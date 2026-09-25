@@ -5,3 +5,45 @@
 /.azure/
 **/Properties/ServiceDependencies/
 **/Properties/PublishProfiles/
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Ll]og/
+[Ll]ogs/
+publish/
+artifacts/
+
+# User-specific IDE files
+*.user
+*.suo
+*.rsuser
+*.userosscache
+*.sln.docstates
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# Tests and coverage
+[Tt]est[Rr]esults/
+*.trx
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# OS junk
+Thumbs.db
+Desktop.ini

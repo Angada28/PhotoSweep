@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Domain logic: scanning, hashing, grouping, review folder + undo. No UI, no OS-specific APIs. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pinned to exactly 3.1.x: 4.x needs a Six Labors licence key. See CLAUDE.md. -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="[3.1.12]" />
+  </ItemGroup>
+
+</Project>

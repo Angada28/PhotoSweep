@@ -1,0 +1,10 @@
+<Project>
+  <!-- Shared by every project under this folder. MSBuild finds this file automatically by walking up from each .csproj. -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Product>PhotoSweep</Product>
+  </PropertyGroup>
+</Project>
