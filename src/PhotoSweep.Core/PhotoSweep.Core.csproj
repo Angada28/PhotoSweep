@@ -1,8 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Domain logic: scanning, hashing, grouping, review folder + undo. No UI, no OS-specific APIs. -->
+  <!-- Domain logic: scanning, hashing, grouping, review folder + undo. No UI. The one OS-specific API is the
+       MoveFileExW P/Invoke in Cleanup/NoCopyMove.cs, guarded by OperatingSystem.IsWindows(). -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+    <!-- [LibraryImport] generates the P/Invoke marshalling code at build time, and that code uses pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

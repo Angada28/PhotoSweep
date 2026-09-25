@@ -3,6 +3,34 @@
 Decisions that were measured or argued rather than obvious, newest first. Each records what was chosen, the
 evidence, and what would make us revisit it.
 
+## 2026-09-25: Clean-up writes the manifest before each move, moves without copying, and never deletes recursively
+
+**Write-ahead manifest.** Each file's manifest entry is saved (temp file, then swapped in) *before* the file is moved,
+and removed again if the move fails. If the manifest can't be written, the file isn't moved. Writing the entry *after*
+the move would leave a window where a crash loses track of a moved file. With the entry first, a crash can only
+leave an entry for a file that never moved, and undo can spot that: the review copy is missing and the original is still
+there with the recorded size and last-write time, so the entry is dropped. Entries store paths relative to the
+root, and the root comes from where the manifest sits, so a batch still undoes if a drive letter changes.
+*Trade-off:* the whole manifest is rewritten per file, which is O(n²) bytes: about 100 MB of writes for a 1,000-file
+batch. Revisit with append-only JSON Lines if batches of tens of thousands become normal.
+
+**No-copy move.** `File.Move` passes `MOVEFILE_COPY_ALLOWED` on Windows, so a move to another volume (a mount point
+inside a scanned folder) silently becomes a copy, which reads every byte and downloads online-only files. Clean-up
+calls `MoveFileExW` with no flags through a source-generated `[LibraryImport]` instead, so that case fails with
+`ERROR_NOT_SAME_DEVICE` and is reported. It also never overwrites a destination, so undo can detect a taken
+name atomically instead of by check-then-move. *Verified:* with a handle open that shares only `FileShare.Delete`,
+Windows refuses other reads (sharing violation) but allows the rename. The tests use that to prove an `Offline` file
+is moved and restored without being read. *Not tested automatically:* the cross-volume refusal (needs a second volume).
+
+**Non-recursive clean-up.** After a full undo, the manifest (our own file, deleted only once it lists nothing) and
+then each empty folder are removed with non-recursive `Directory.Delete`, deepest first. Windows refuses to remove a
+folder that still holds anything, so a bug in "is it empty?" can at worst leave a folder behind, never delete a photo.
+
+**Re-checked at execution time.** Validation (`CleanupPlan.Validate`) refuses selections that remove every copy
+in a group. Just before moving, each group is checked again: at least one kept member must still exist with the
+size and last-write time from the scan (an edited keeper doesn't count), otherwise the group is skipped. Each selected
+file must also still match the scan, otherwise it's skipped as changed. These checks read directory metadata only.
+
 ## 2026-09-25: Groups are split around a keeper, not taken whole from union-find
 
 **Decision.** After union-find joins every matching pair, each connected set is split: the best-ranked file

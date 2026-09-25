@@ -1,0 +1,38 @@
+namespace PhotoSweep.Core.Cleanup;
+
+public enum CleanupFailureReason
+{
+    /// <summary>None of the group's kept copies is still on disk unchanged, so removing the rest could lose the photo.</summary>
+    KeptCopyMissing,
+
+    /// <summary>The file's size or last-write time no longer matches the scan; it may have been edited.</summary>
+    ChangedSinceScan,
+
+    /// <summary>The file isn't where it should be (deleted, or emptied out of the review folder).</summary>
+    NotFound,
+
+    /// <summary>The move itself failed: file in use, access denied, different volume, manifest not writable.</summary>
+    IoError,
+}
+
+/// <summary>One file that was skipped or couldn't be moved. The other files carry on regardless.</summary>
+public sealed record CleanupFailure(string Path, CleanupFailureReason Reason, string Message);
+
+public sealed record MovedFile(string OriginalPath, string ReviewPath);
+
+public sealed record RestoredFile(string OriginalPath, string RestoredPath)
+{
+    /// <summary>True when something else now lives at the original path, so the file came back as "name (2).jpg".</summary>
+    public bool AlternateName => !string.Equals(OriginalPath, RestoredPath, StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// One clean-up, which can be undone as a unit. A handle, not a copy of the data: the manifests on disk are the source
+/// of truth, and <see cref="ReviewFolder.Undo"/> re-reads them. There is one manifest per scanned root the clean-up
+/// touched, all sharing <see cref="Id"/>.
+/// </summary>
+public sealed record CleanupBatch(Guid Id, DateTime CreatedUtc, IReadOnlyList<string> ManifestPaths, int FileCount, long TotalBytes);
+
+public sealed record CleanupResult(CleanupBatch Batch, IReadOnlyList<MovedFile> Moved, IReadOnlyList<CleanupFailure> Failures);
+
+public sealed record UndoResult(IReadOnlyList<RestoredFile> Restored, IReadOnlyList<CleanupFailure> Failures);
