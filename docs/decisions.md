@@ -78,10 +78,40 @@ sequential loop would pass one second.
 
 ## Open issues (for the threshold-tuning phase)
 
+### 2026-09-25: Hand review of SamePhoto groups (Google Takeout library)
+
+**Setup.** A Google Takeout export of about 9,000 photos (8,998 decoded; 540 SamePhoto groups covering 1,450 files)
+under the current limits (SamePhoto: pHash ≤ 8, dHash ≤ 8). 34 groups were judged by eye on a throwaway review page:
+30 picked at random with a fixed seed, plus 4 flagged beforehand as suspicious.
+
+**Result.** 20 same photo, 14 different photo, 0 wrong keeper. Precision on the random 30 alone: 19/30 ≈ 63%.
+The library has no byte-identical copies, so every group was a look-alike match.
+
+**What went wrong (14 groups).**
+- 7 screenshots of the same app (Pokémon GO, YouTube, authenticator). This confirms the screenshot issue below.
+- 6 burst frames taken 2–3 s apart.
+- 1 burst cover GIF grouped with one of the burst's stills.
+
+**Where the line falls.** Every wrong group had pHash ≥ 5 or dHash ≥ 5. True re-saves (a photo vs a screenshot of
+it, Snapchat and WhatsApp re-saves) were at 0–1 bits.
+
+**Candidates for tuning (no code changes yet; tuning comes after the UI).**
+- SamePhoto = pHash ≤ 4 **and** dHash ≤ 4. On this sample it keeps 14 of the 20 correct groups and none of the 14
+  wrong ones. The 6 correct groups it loses are burst frames, which belong in Similar anyway.
+- Screenshots need a stricter rule than photos, and should never be pre-selected for removal.
+- Burst cover GIFs shouldn't be grouped with the burst's stills.
+- Caveat: 34 groups from one library. Re-check the candidate limits on a second library (e.g. the 17k OneDrive one)
+  before adopting them.
+
+**Related: Takeout `.json` sidecars.** Each Takeout photo has a metadata sidecar (`IMG_1234.jpg.json`). Clean-up
+moves only the photo, so its sidecar stays behind in the library. Decide whether sidecars should move with their photo
+(and back on undo).
+
 - **Lock-screen and app screenshots group as SamePhoto.** Screenshots of the same lock screen or app UI differ
   only in small text (clock, notifications) and hash 4–5 bits apart, well inside the SamePhoto limits. The hashes
   are doing their job, as the images really are ~95% identical pixels, but they aren't duplicates. Tighter
   thresholds won't separate them without breaking real matches; this likely needs screenshot-specific handling.
+  The hand review above found 7 of its 14 wrong groups were app screenshots.
 - **`name.0.jpg` isn't recognised as a copy name.** Some apps save a second copy as `X.0.jpg`, and it can win the
   keeper ranking on age. Adding a `\.\d+$` pattern is cheap but could match real file names, so it needs testing
   against a real library first.
