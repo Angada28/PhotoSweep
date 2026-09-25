@@ -1,3 +1,7 @@
 /completed version/
 /.vs
-/github
+# Visual Studio Copilot / Azure tooling - keep out of the repo
+/.github/
+/.azure/
+**/Properties/ServiceDependencies/
+**/Properties/PublishProfiles/
