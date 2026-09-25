@@ -95,6 +95,18 @@ public class KeeperRankerTests
         Assert.Equal("Larger file, less compressed (1.5 MB vs 200 KB)", reason);
     }
 
+    // Each pair differs by more than the 1% tie margin, so size decides; the first two both round to "1.3 MB".
+    [Theory]
+    [InlineData(1_405_092, 1_352_663, "1.34 MB vs 1.29 MB")]
+    [InlineData(1_363_149, 1_342_177, "1.30 MB vs 1.28 MB")] // trailing zero kept so the two line up
+    [InlineData(1_048_576_000, 1_027_604_480, "1000 MB vs 980 MB")] // one decimal already differs: unchanged
+    public void Sizes_that_round_the_same_get_more_decimals(long larger, long smaller, string expected)
+    {
+        var (_, reason) = Rank(Photo("a.jpg", size: smaller), Photo("b.jpg", size: larger));
+
+        Assert.Equal($"Larger file, less compressed ({expected})", reason);
+    }
+
     [Fact]
     public void Size_within_one_percent_is_a_tie()
     {

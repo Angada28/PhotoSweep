@@ -35,7 +35,7 @@ public static partial class KeeperRanker
         new((a, b) => a.LooksLikeCopy.CompareTo(b.LooksLikeCopy),
             (_, b) => $"Original file name (\"{Path.GetFileName(b.File.Path)}\" looks like a copy)"),
         new((a, b) => b.SizeWithinFormat.CompareTo(a.SizeWithinFormat),
-            (a, b) => $"Larger file, less compressed ({Bytes(a.File.SizeBytes)} vs {Bytes(b.File.SizeBytes)})"),
+            (a, b) => $"Larger file, less compressed ({Sizes(a.File.SizeBytes, b.File.SizeBytes)})"),
         new((a, b) => WholeSeconds(a.File.LastWriteUtc).CompareTo(WholeSeconds(b.File.LastWriteUtc)),
             (a, b) => $"Older copy (modified {Dates(a.File.LastWriteUtc, b.File.LastWriteUtc)})"),
         new((a, b) => string.CompareOrdinal(a.File.Path, b.File.Path),
@@ -117,7 +117,23 @@ public static partial class KeeperRanker
         return $"{make} {model}";
     }
 
-    private static string Bytes(long bytes)
+    /// <summary>
+    /// "1.5 MB vs 200 KB", adding decimals (up to 3) until the two read differently, so a real difference never
+    /// shows as "1.3 MB vs 1.3 MB". Exact bytes as a last resort.
+    /// </summary>
+    private static string Sizes(long a, long b)
+    {
+        for (var decimals = 1; decimals <= 3; decimals++)
+        {
+            var (x, y) = (Bytes(a, decimals), Bytes(b, decimals));
+            if (x != y)
+                return $"{x} vs {y}";
+        }
+
+        return string.Create(CultureInfo.InvariantCulture, $"{a:N0} B vs {b:N0} B");
+    }
+
+    private static string Bytes(long bytes, int decimals)
     {
         string[] units = ["B", "KB", "MB", "GB"];
         double value = bytes;
@@ -128,7 +144,9 @@ public static partial class KeeperRanker
             unit++;
         }
 
-        return unit == 0 ? $"{bytes} B" : string.Create(CultureInfo.InvariantCulture, $"{value:0.#} {units[unit]}");
+        // One decimal drops a trailing zero ("200 KB"); more keep them, so the two sizes line up ("1.30 vs 1.29").
+        var format = decimals == 1 ? "0.#" : "F" + decimals;
+        return unit == 0 ? $"{bytes} B" : value.ToString(format, CultureInfo.InvariantCulture) + " " + units[unit];
     }
 
     // Local time, as the user sees it in Explorer; add the time of day only when the dates alone look equal.
