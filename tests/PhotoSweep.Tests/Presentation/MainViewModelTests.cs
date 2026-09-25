@@ -9,7 +9,7 @@ public class MainViewModelTests
     private readonly FakeFolderPicker _picker = new();
     private readonly FakeScanService _service = new();
 
-    private MainViewModel Create() => new(_picker, new FakeKnownFolders(), _service, new ManualTimeProvider());
+    private MainViewModel Create() => new(_picker, new FakeKnownFolders(), _service, new FakeFileAvailability(), new ManualTimeProvider());
 
     [Fact]
     public void Starts_on_the_start_page()

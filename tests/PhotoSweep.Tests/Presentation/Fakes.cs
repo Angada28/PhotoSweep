@@ -1,3 +1,4 @@
+using PhotoSweep.Core.Scanning;
 using PhotoSweep.Presentation.Services;
 
 namespace PhotoSweep.Tests.Presentation;
@@ -27,4 +28,24 @@ internal sealed class FakeKnownFolders(string? pictures = null, string? oneDrive
     public string? Pictures { get; } = pictures;
 
     public string? OneDrive { get; } = oneDrive;
+}
+
+/// <summary>Every file is on this PC unless the test says otherwise. Counts checks, to prove when they happen.</summary>
+internal sealed class FakeFileAvailability : IFileAvailability
+{
+    private readonly Dictionary<string, FileAvailability> _states = new(StringComparer.OrdinalIgnoreCase);
+
+    public List<string> Checked { get; } = [];
+
+    public FakeFileAvailability Set(string path, FileAvailability state)
+    {
+        _states[path] = state;
+        return this;
+    }
+
+    public FileAvailability Check(string path)
+    {
+        Checked.Add(path);
+        return _states.GetValueOrDefault(path, FileAvailability.Local);
+    }
 }

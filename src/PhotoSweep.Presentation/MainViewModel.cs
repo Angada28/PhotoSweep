@@ -10,11 +10,18 @@ namespace PhotoSweep.Presentation;
 public sealed partial class MainViewModel : ObservableObject
 {
     private readonly IScanService _scanService;
+    private readonly IFileAvailability _availability;
     private readonly TimeProvider _time;
 
-    public MainViewModel(IFolderPicker folderPicker, IKnownFolders knownFolders, IScanService scanService, TimeProvider? time = null)
+    public MainViewModel(
+        IFolderPicker folderPicker,
+        IKnownFolders knownFolders,
+        IScanService scanService,
+        IFileAvailability availability,
+        TimeProvider? time = null)
     {
         _scanService = scanService;
+        _availability = availability;
         _time = time ?? TimeProvider.System;
         Start = new StartViewModel(folderPicker, knownFolders, StartScan);
         _currentPage = Start;
@@ -40,7 +47,7 @@ public sealed partial class MainViewModel : ObservableObject
         _ = scanning.RunAsync(); // never throws: every outcome becomes a page state or a navigation
     }
 
-    private void ShowResults(ScanOutcome outcome) => CurrentPage = new ResultsViewModel(outcome, GoToStart);
+    private void ShowResults(ScanOutcome outcome) => CurrentPage = new ResultsViewModel(outcome, _scanService, _availability, GoToStart, _time);
 
     private void GoToStart() => CurrentPage = Start;
 }

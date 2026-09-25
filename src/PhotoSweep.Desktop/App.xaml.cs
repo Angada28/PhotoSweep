@@ -21,7 +21,8 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        _main = new MainViewModel(new WpfFolderPicker(), new WindowsKnownFolders(), new ScanService(ScanCache.DefaultPath));
+        _main = new MainViewModel(
+            new WpfFolderPicker(), new WindowsKnownFolders(), new ScanService(ScanCache.DefaultPath), new DiskFileAvailability());
         var window = new MainWindow { DataContext = _main };
         window.Closing += OnMainWindowClosing;
         window.Show();

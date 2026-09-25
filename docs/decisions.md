@@ -3,6 +3,40 @@
 Decisions that were measured or argued rather than obvious, newest first. Each records what was chosen, the
 evidence, and what would make us revisit it.
 
+## 2026-09-25: Results-page thumbnails: ImageSharp, checked for cloud files twice, settle delay before decoding
+
+**ImageSharp, not WIC.** WPF's own decoder (WIC) is faster and shows HEIC when the Windows codec is installed, but
+rule 4 says ImageSharp decodes everything. `Core/Imaging/Thumbnail` sets `DecoderOptions.TargetSize`, so JPEGs are
+scaled down *while* decoding, applies `AutoOrient()` (WPF ignores EXIF orientation), and returns raw BGRA pixels
+that Desktop wraps in a frozen `BitmapSource`. *Trade-off:* HEIC shows "No preview". `TargetSize` also scales small
+images *up*, so it's only set when the image is bigger than the box (a test caught this).
+
+**Two online-only checks.** The view-model re-checks each photo's attributes every time its tile comes on screen,
+so a file freed up by OneDrive after the scan gets the cloud placeholder. `Thumbnail.LoadAsync` checks again right
+before opening the file, because a thumbnail can wait in the decode queue while the file changes. The second check
+is the one rule 6 relies on; the first decides what the tile shows.
+
+**Settle delay.** A scroll test (1,500 groups, 3,000 photos, the scrollbar dragged top to bottom in about 2 s,
+Debug counters from `ThumbnailStats`) measured:
+
+| | requested | skipped | decoded | decoded too late for their row |
+|---|---|---|---|---|
+| Cancel-while-queued only | 912 | 87 | 825 | 278 |
+| + 60 ms settle delay + cancellable decode | 890 | 884 | 6 | 0 |
+
+While dragging, a row is on screen for about 20 ms, so a 60 ms wait before joining the queue skips it for free.
+Scrolling a page at a time (2 pages/s) still decoded every thumbnail and skipped none. Revisit if thumbnails feel
+slow to appear on very fast machines, where the delay becomes most of the wait.
+
+## 2026-09-25: Pre-selection lives in one policy; at Similar only byte-identical copies are pre-selected
+
+`Core/Cleanup/PreselectionPolicy.IsSuggested(member, level)` is the only place that decides what starts out ticked:
+every non-keeper at Exact and SamePhoto, and at Similar only members byte-identical to the keeper (a Similar group can
+hold different burst frames the user wants to keep). It takes the whole `GroupMember`, so tuning can use the hash
+distances later without touching the page. It never suggests the keeper, so the policy can't select a whole group.
+The page enforces that rule for clicks too (the last unselected photo can't be selected), and `CleanupPlan`
+checks it again before anything moves.
+
 ## 2026-09-25: Strictness travels next to ScanOptions, not inside it
 
 The start screen hands over a `ScanRequest(ScanOptions Options, MatchLevel Level)` (Presentation) instead of adding
