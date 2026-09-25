@@ -84,6 +84,13 @@ sequential loop would pass one second.
 under the current limits (SamePhoto: pHash ≤ 8, dHash ≤ 8). 34 groups were judged by eye on a throwaway review page:
 30 picked at random with a fixed seed, plus 4 flagged beforehand as suspicious.
 
+**Judging rule.** "Same" meant no visible difference at all. Pairs marked "different" were very close but had a
+visible change: facial pose or expression, lighting, or a small shift in the scene. This is why burst frames appear
+on both sides of the tally: frames where nothing visibly changed were judged same, frames with any change different.
+It also defines the levels for tuning:
+- **SamePhoto** = visually indistinguishable: a re-save, resize or re-compress of the same picture.
+- **Similar** = near-identical shots with any real change (bursts, retakes). Shown to the user, never pre-selected.
+
 **Result.** 20 same photo, 14 different photo, 0 wrong keeper. Precision on the random 30 alone: 19/30 ≈ 63%.
 The library has no byte-identical copies, so every group was a look-alike match.
 
@@ -97,7 +104,8 @@ it, Snapchat and WhatsApp re-saves) were at 0–1 bits.
 
 **Candidates for tuning (no code changes yet; tuning comes after the UI).**
 - SamePhoto = pHash ≤ 4 **and** dHash ≤ 4. On this sample it keeps 14 of the 20 correct groups and none of the 14
-  wrong ones. The 6 correct groups it loses are burst frames, which belong in Similar anyway.
+  wrong ones. The 6 correct groups it loses are burst frames with no visible change; under the definitions above,
+  burst frames belong in Similar anyway.
 - Screenshots need a stricter rule than photos, and should never be pre-selected for removal.
 - Burst cover GIFs shouldn't be grouped with the burst's stills.
 - Caveat: 34 groups from one library. Re-check the candidate limits on a second library (e.g. the 17k OneDrive one)
