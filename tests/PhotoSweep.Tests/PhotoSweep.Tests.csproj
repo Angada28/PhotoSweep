@@ -18,6 +18,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Committed test photos (see TestData/Photos/README.md), copied next to the test DLL. -->
+    <None Include="TestData\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\PhotoSweep.Core\PhotoSweep.Core.csproj" />
     <ProjectReference Include="..\..\src\PhotoSweep.Presentation\PhotoSweep.Presentation.csproj" />
   </ItemGroup>
