@@ -3,6 +3,15 @@
 Decisions that were measured or argued rather than obvious, newest first. Each records what was chosen, the
 evidence, and what would make us revisit it.
 
+## 2026-09-25: Strictness travels next to ScanOptions, not inside it
+
+The start screen hands over a `ScanRequest(ScanOptions Options, MatchLevel Level)` (Presentation) instead of adding
+`MatchLevel` to `ScanOptions` (Core). The scan doesn't depend on the level: every file gets the same hashes, and they are
+cached. Only `DuplicateGrouper.Group(scan, level)` uses it. Keeping it out of `ScanOptions` means the scanner never
+carries a setting it ignores, and a later results screen can re-group at another level without scanning again.
+*Trade-off:* one more small type to pass around. Revisit if some level ever needs different scan work (e.g. Exact
+skipping perceptual hashing to save time), because then the scanner would genuinely need to know the level.
+
 ## 2026-09-25: Clean-up writes the manifest before each move, moves without copying, and never deletes recursively
 
 **Write-ahead manifest.** Each file's manifest entry is saved (temp file, then swapped in) *before* the file is moved,
