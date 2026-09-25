@@ -11,10 +11,14 @@ namespace PhotoSweep.Core.Grouping;
 /// <list type="number">
 /// <item>Exact pass: files with the same SHA-256 are merged. This is the only way undecodable files (e.g. HEIC)
 /// get grouped, since they have no fingerprint.</item>
-/// <item>Look-alike pass (not for <see cref="MatchLevel.Exact"/>): one fingerprint per distinct file goes into a
-/// <see cref="BkTree"/> keyed by pHash. Each is queried within the pHash radius, and a hit counts only if the
-/// dHash distance is also within its limit.</item>
-/// <item>Matches are merged with <see cref="UnionFind"/>, so groups are transitive: A~B and B~C gives {A, B, C}.</item>
+/// <item>Look-alike pass (not for <see cref="MatchLevel.Exact"/>): one fingerprint per distinct file, compared
+/// pairwise by brute force. A pair matches only if both pHash and dHash are within the level's limits. (A BK-tree
+/// was tried and was 17× slower on a real library; see docs/decisions.md.)</item>
+/// <item>Matches are merged with <see cref="UnionFind"/> into connected sets.</item>
+/// <item>Each set is split around keepers, because matching is not transitive: in a burst, neighbouring frames
+/// match but the first and last may look nothing alike. The best file becomes a keeper and takes every file
+/// within the thresholds of IT; the leftovers are split the same way. So every member of a group is directly
+/// within the level's thresholds of its keeper.</item>
 /// </list>
 /// </remarks>
 public static class DuplicateGrouper
@@ -29,7 +33,7 @@ public static class DuplicateGrouper
     public static IReadOnlyList<PhotoGroup> Group(IEnumerable<ScannedFile> files, MatchLevel level)
     {
         ArgumentNullException.ThrowIfNull(files);
-        var thresholds = MatchThresholds.For(level); // validates the level up front
+        var limits = MatchThresholds.For(level); // validates the level up front
 
         // Anything with data takes part, whatever its status: that includes online-only files served from the
         // cache and undecodable files that were still hashed. Files never read (online-only skipped, unreadable)
@@ -49,20 +53,23 @@ public static class DuplicateGrouper
                 firstWithSha[sha] = i;
         }
 
-        if (thresholds is { } limits)
-            MergeLookAlikes(candidates, sets, limits);
+        if (limits is { } l)
+            MergeLookAlikes(candidates, sets, l);
 
-        return sets.Sets()
-            .Where(ids => ids.Count > 1)
-            .Select(ids => BuildGroup(ids.Select(i => candidates[i]).ToList()))
-            .OrderBy(g => g.Keeper.File.Path, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var groups = new List<PhotoGroup>();
+        foreach (var ids in sets.Sets())
+        {
+            if (ids.Count > 1)
+                groups.AddRange(SplitAroundKeepers(ids.Select(i => candidates[i]).ToList(), limits));
+        }
+
+        return groups.OrderBy(g => g.Keeper.File.Path, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static void MergeLookAlikes(List<ScannedFile> candidates, UnionFind sets, MatchThresholds limits)
     {
         // One representative per distinct file (after the exact pass each set is one SHA-256): byte-identical copies
-        // have identical fingerprints, so querying them all would only repeat the same work.
+        // have identical fingerprints, so comparing them all would only repeat the same work.
         var representatives = new List<int>();
         var seenSets = new HashSet<int>();
         for (var i = 0; i < candidates.Count; i++)
@@ -71,44 +78,90 @@ public static class DuplicateGrouper
                 representatives.Add(i);
         }
 
-        var tree = new BkTree();
-        foreach (var i in representatives)
-            tree.Add(candidates[i].Fingerprint!.Value.PHash, i);
+        // Flat arrays: the inner loop is two XORs and two popcounts over contiguous memory, which the CPU streams
+        // through far faster than any index structure could skip work on clustered photo hashes.
+        var count = representatives.Count;
+        var pHashes = new ulong[count];
+        var dHashes = new ulong[count];
+        for (var k = 0; k < count; k++)
+            (pHashes[k], dHashes[k]) = candidates[representatives[k]].Fingerprint!.Value;
 
-        foreach (var i in representatives)
+        for (var a = 0; a < count; a++)
         {
-            var fp = candidates[i].Fingerprint!.Value;
-            foreach (var j in tree.Query(fp.PHash, limits.PHashRadius))
+            var (p, d) = (pHashes[a], dHashes[a]);
+            for (var b = a + 1; b < count; b++)
             {
-                // j > i: each pair is found from both ends; handle it once.
-                if (j > i && Hamming.Distance(fp.DHash, candidates[j].Fingerprint!.Value.DHash) <= limits.DHashLimit)
-                    sets.Union(i, j);
+                if (Hamming.Distance(p, pHashes[b]) <= limits.PHashRadius && Hamming.Distance(d, dHashes[b]) <= limits.DHashLimit)
+                    sets.Union(representatives[a], representatives[b]);
             }
         }
     }
 
-    private static PhotoGroup BuildGroup(List<ScannedFile> files)
+    /// <summary>
+    /// Splits one connected set into groups in which every member is within <paramref name="limits"/> of the keeper.
+    /// Deterministic: the set is ranked once (independent of input order) and keepers are taken in rank order.
+    /// </summary>
+    private static IEnumerable<PhotoGroup> SplitAroundKeepers(List<ScannedFile> set, MatchThresholds? limits)
     {
-        var (ranked, reason) = KeeperRanker.Rank(files);
-        var keeper = ranked[0];
-        var members = ranked.Select((file, index) => Classify(file, keeper, isKeeper: index == 0)).ToList();
-        return new PhotoGroup(members, reason);
+        // A file's fingerprint, or failing that the fingerprint of a byte-identical copy. Deciding per distinct file
+        // rather than per path guarantees byte-identical copies always end up in the same group.
+        var fingerprintBySha = set
+            .Where(f => f is { Sha256: not null, Fingerprint: not null })
+            .GroupBy(f => f.Sha256!)
+            .ToDictionary(g => g.Key, g => g.First().Fingerprint!.Value);
+        ImageFingerprint? FingerprintOf(ScannedFile f) =>
+            f.Fingerprint ?? (f.Sha256 is { } sha && fingerprintBySha.TryGetValue(sha, out var fp) ? fp : null);
+
+        var remaining = KeeperRanker.Rank(set).Ranked.ToList();
+        while (remaining.Count > 1)
+        {
+            var keeper = remaining[0];
+            var keeperFingerprint = FingerprintOf(keeper);
+            var members = new List<ScannedFile>();
+            var leftovers = new List<ScannedFile>();
+            foreach (var f in remaining) // stays in rank order, so the keeper is members[0]
+            {
+                var belongs = ReferenceEquals(f, keeper)
+                    || SameBytes(f, keeper)
+                    || (limits is { } l && keeperFingerprint is { } k && FingerprintOf(f) is { } fp && Within(l, fp, k));
+                (belongs ? members : leftovers).Add(f);
+            }
+
+            remaining = leftovers;
+
+            if (members.Count > 1)
+                yield return BuildGroup(members, set, FingerprintOf);
+        }
     }
 
-    private static GroupMember Classify(ScannedFile file, ScannedFile keeper, bool isKeeper)
+    private static PhotoGroup BuildGroup(List<ScannedFile> members, List<ScannedFile> set, Func<ScannedFile, ImageFingerprint?> fingerprintOf)
+    {
+        // Ranked against the whole set, so the keeper is the same file the split was built around.
+        var (ranked, reason) = KeeperRanker.Rank(members, context: set);
+        var keeper = ranked[0];
+        var result = ranked.Select((file, index) => Classify(file, keeper, isKeeper: index == 0, fingerprintOf)).ToList();
+        return new PhotoGroup(result, reason);
+    }
+
+    private static GroupMember Classify(ScannedFile file, ScannedFile keeper, bool isKeeper, Func<ScannedFile, ImageFingerprint?> fingerprintOf)
     {
         int? p = null, d = null;
-        if (file.Fingerprint is { } a && keeper.Fingerprint is { } b)
+        if (fingerprintOf(file) is { } a && fingerprintOf(keeper) is { } b)
         {
             p = Hamming.Distance(a.PHash, b.PHash);
             d = Hamming.Distance(a.DHash, b.DHash);
         }
 
         var kind = isKeeper ? MatchKind.Keeper
-            : file.Sha256 is not null && file.Sha256 == keeper.Sha256 ? MatchKind.Identical
+            : SameBytes(file, keeper) ? MatchKind.Identical
             : p is { } pd && d is { } dd && MatchThresholds.SamePhoto.Accepts(pd, dd) ? MatchKind.SamePhoto
             : MatchKind.Similar;
 
         return new GroupMember(file, kind, p, d);
     }
+
+    private static bool SameBytes(ScannedFile a, ScannedFile b) => a.Sha256 is not null && a.Sha256 == b.Sha256;
+
+    private static bool Within(MatchThresholds limits, ImageFingerprint a, ImageFingerprint b) =>
+        limits.Accepts(Hamming.Distance(a.PHash, b.PHash), Hamming.Distance(a.DHash, b.DHash));
 }

@@ -59,13 +59,22 @@ public static partial class KeeperRanker
     /// byte-identical to it: "it has a shorter path than its identical twin" tells the user nothing when a
     /// lower-resolution copy is also in the group.
     /// </summary>
-    public static (IReadOnlyList<ScannedFile> Ranked, string Reason) Rank(IReadOnlyCollection<ScannedFile> files)
+    /// <param name="files">The files to rank.</param>
+    /// <param name="context">
+    /// The collection the group-relative keys (resolution tier, size within format) are measured against; defaults
+    /// to <paramref name="files"/>. <paramref name="files"/> must be a subset of it. With a fixed context, ranking any
+    /// subset gives the same order as ranking the whole context and filtering, so splitting a set into groups can't
+    /// change which file comes first.
+    /// </param>
+    public static (IReadOnlyList<ScannedFile> Ranked, string Reason) Rank(
+        IReadOnlyCollection<ScannedFile> files,
+        IReadOnlyCollection<ScannedFile>? context = null)
     {
         ArgumentNullException.ThrowIfNull(files);
         if (files.Count == 0)
             return ([], IdenticalReason);
 
-        var ranked = Candidate.For(files).Order(Order).ToList();
+        var ranked = Candidate.For(files, context ?? files).Order(Order).ToList();
         var keeper = ranked[0];
         var rival = ranked.Skip(1).FirstOrDefault(c => !SameBytes(c.File, keeper.File));
         var reason = rival is null ? IdenticalReason : Explain(keeper, rival);
@@ -134,10 +143,10 @@ public static partial class KeeperRanker
     /// <summary>A file plus its sort keys, some of which depend on the rest of the group.</summary>
     private sealed record Candidate(ScannedFile File, long ResolutionTier, bool HasCameraData, bool LooksLikeCopy, double SizeWithinFormat)
     {
-        public static IEnumerable<Candidate> For(IReadOnlyCollection<ScannedFile> files)
+        public static IEnumerable<Candidate> For(IReadOnlyCollection<ScannedFile> files, IReadOnlyCollection<ScannedFile> context)
         {
-            var maxPixels = files.Max(f => Pixels(f));
-            var maxSizeByFormat = files
+            var maxPixels = context.Max(f => Pixels(f));
+            var maxSizeByFormat = context
                 .GroupBy(f => Format(f.Path))
                 .ToDictionary(g => g.Key, g => g.Max(f => f.SizeBytes));
 

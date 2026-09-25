@@ -65,7 +65,7 @@ public class DuplicateGrouperTests
     [InlineData(8, 8, true)]
     [InlineData(3, 3, true)]
     [InlineData(9, 0, false)] // pHash too far, even though dHash is a perfect match
-    [InlineData(0, 9, false)] // dHash too far: found by the pHash tree query, then rejected
+    [InlineData(0, 9, false)] // dHash too far, even though pHash is a perfect match
     [InlineData(20, 20, false)]
     public void Both_hashes_must_agree(int pDistance, int dDistance, bool grouped)
     {
@@ -87,22 +87,86 @@ public class DuplicateGrouperTests
     }
 
     [Fact]
-    public void Matches_chain_into_one_group_and_the_far_end_is_labelled_similar()
+    public void A_chain_is_split_around_the_keeper_and_leftovers_regroup()
     {
-        // a–b and b–c are 6 bits apart (within SamePhoto's 8); a–c is 12 bits apart.
+        // Each file is 6 bits from the next (within SamePhoto's 8), so all four are connected; a–c is 12 bits.
         ScannedFile[] files =
         [
-            Photo("a.jpg", width: 2000, height: 1500), // highest resolution, so the keeper
+            Photo("a.jpg", width: 2000, height: 1500), // highest resolution, so the first keeper
             Photo("b.jpg", pHash: Bits(6), dHash: Bits(6)),
             Photo("c.jpg", pHash: Bits(12), dHash: Bits(12)),
+            Photo("d.jpg", pHash: Bits(18), dHash: Bits(18)),
+        ];
+
+        var groups = DuplicateGrouper.Group(files, MatchLevel.SamePhoto);
+
+        Assert.Equal([["a.jpg", "b.jpg"], ["c.jpg", "d.jpg"]], groups.Select(Names));
+        Assert.All(groups, g => Assert.Equal(MatchKind.SamePhoto, g.Members[1].Kind));
+    }
+
+    [Fact]
+    public void A_leftover_with_nothing_close_enough_is_dropped()
+    {
+        ScannedFile[] files =
+        [
+            Photo("a.jpg", width: 2000, height: 1500),
+            Photo("b.jpg", pHash: Bits(6), dHash: Bits(6)),
+            Photo("c.jpg", pHash: Bits(12), dHash: Bits(12)), // matches only b, which a already took
         ];
 
         var group = Assert.Single(DuplicateGrouper.Group(files, MatchLevel.SamePhoto));
 
-        Assert.Equal("a.jpg", Path.GetFileName(group.Keeper.File.Path));
-        Assert.Equal(MatchKind.SamePhoto, KindOf(group, "b.jpg"));
-        Assert.Equal(MatchKind.Similar, KindOf(group, "c.jpg"));
-        Assert.Equal(12, group.Members.Single(m => m.File.Path.EndsWith("c.jpg")).PHashDistance);
+        Assert.Equal(["a.jpg", "b.jpg"], Names(group));
+    }
+
+    // A burst: frame k's hashes are 3k bits from frame 0, so each frame is 3 bits from the next and the ends are
+    // 27 bits apart. Union-find alone would make one 10-photo group of frames that don't all look alike.
+    private static ScannedFile[] Burst() =>
+        Enumerable.Range(0, 10).Select(k => Photo($"burst_{k:00}.jpg", pHash: Bits(3 * k), dHash: Bits(3 * k))).ToArray();
+
+    [Fact]
+    public void A_burst_whose_neighbours_match_but_ends_do_not_is_not_one_group()
+    {
+        var groups = DuplicateGrouper.Group(Burst(), MatchLevel.SamePhoto);
+
+        // All frames rank equally, so path order picks each keeper; each takes the frames within 8 bits of it.
+        Assert.Equal(
+            [["burst_00.jpg", "burst_01.jpg", "burst_02.jpg"], ["burst_03.jpg", "burst_04.jpg", "burst_05.jpg"], ["burst_06.jpg", "burst_07.jpg", "burst_08.jpg"]],
+            groups.Select(Names));
+        Assert.DoesNotContain(groups, g => Names(g).Contains("burst_00.jpg") && Names(g).Contains("burst_09.jpg"));
+        Assert.All(groups.SelectMany(g => g.Members.Skip(1)), m => Assert.True(MatchThresholds.SamePhoto.Accepts(m.PHashDistance!.Value, m.DHashDistance!.Value)));
+    }
+
+    [Fact]
+    public void Keeper_centred_groups_do_not_depend_on_input_order()
+    {
+        static string Describe(IEnumerable<ScannedFile> files) => string.Join(" | ",
+            DuplicateGrouper.Group(files, MatchLevel.SamePhoto).Select(g => string.Join(",", Names(g)) + ":" + g.KeeperReason));
+
+        var burst = Burst();
+        var expected = Describe(burst);
+        var random = new Random(7);
+        for (var i = 0; i < 20; i++)
+            Assert.Equal(expected, Describe(burst.OrderBy(_ => random.Next()).ToArray()));
+    }
+
+    [Fact]
+    public void Byte_identical_copies_are_never_split_apart()
+    {
+        ScannedFile[] files =
+        [
+            Photo("a.jpg", width: 2000, height: 1500),
+            Photo("b.jpg", pHash: Bits(6), dHash: Bits(6), sha: "B"),
+            Undecodable("b copy.jpg", sha: "B"), // no fingerprint of its own; goes wherever its twin goes
+            Photo("c1.jpg", pHash: Bits(12), dHash: Bits(12), sha: "C"),
+            Photo("c2.jpg", pHash: Bits(12), dHash: Bits(12), sha: "C"),
+        ];
+
+        var groups = DuplicateGrouper.Group(files, MatchLevel.SamePhoto);
+
+        Assert.Equal([["a.jpg", "b.jpg", "b copy.jpg"], ["c1.jpg", "c2.jpg"]], groups.Select(Names));
+        var bCopy = groups[0].Members.Single(m => Path.GetFileName(m.File.Path) == "b copy.jpg");
+        Assert.Equal((MatchKind.SamePhoto, 6, 6), (bCopy.Kind, bCopy.PHashDistance, bCopy.DHashDistance));
     }
 
     [Fact]

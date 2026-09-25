@@ -13,10 +13,7 @@ public enum MatchKind
     /// <summary>Within the <see cref="MatchThresholds.SamePhoto"/> limits of the keeper.</summary>
     SamePhoto,
 
-    /// <summary>
-    /// Looser than SamePhoto relative to the keeper. Includes members that only joined through a chain
-    /// (A~B, B~C puts C with A even when C isn't close to A), so the label never overstates the likeness.
-    /// </summary>
+    /// <summary>Within the <see cref="MatchThresholds.Similar"/> limits of the keeper but not the SamePhoto ones.</summary>
     Similar,
 }
 
