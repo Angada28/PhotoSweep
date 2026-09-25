@@ -29,3 +29,4 @@ against a pinned SHA-256 hash. The licence notes below are quoted from scikit-im
 | `<name>_q50.jpg`    | Original re-encoded at JPEG quality 50 |
 | `<name>.png`        | Original converted to PNG |
 | `<name>_exif6.jpg`  | Pixels stored rotated 90° anticlockwise with EXIF Orientation = 6, so it *displays* upright |
+| `<name>_harsh.jpg`  | Quarter size + 10% brighter + JPEG quality 20, all at once |

@@ -12,6 +12,7 @@
 //   <name>.png        converted to PNG
 //   <name>_exif6.jpg  pixels stored rotated 90° anticlockwise with EXIF Orientation = 6 ("rotate 90° CW to
 //                     display"), the way a phone saves a portrait shot
+//   <name>_harsh.jpg  quarter size + 10% brighter + JPEG quality 20, all at once
 // Sources and licences are listed in TestData/Photos/README.md.
 
 using System.Runtime.CompilerServices;
@@ -69,6 +70,10 @@ foreach (var (name, expectedSha) in sources)
         rotated.Metadata.ExifProfile.SetValue(ExifTag.Orientation, (ushort)6);
         rotated.SaveAsJpeg(Path.Combine(outputDir, $"{name}_exif6.jpg"), q90);
     }
+
+    // All three edits at once, harsh enough that the hashes should move a few bits but still match.
+    using (var harsh = original.Clone(x => x.Resize(original.Width / 4, 0).Brightness(1.1f)))
+        harsh.SaveAsJpeg(Path.Combine(outputDir, $"{name}_harsh.jpg"), new JpegEncoder { Quality = 20 });
 
     Console.WriteLine($"{name}: done");
 }

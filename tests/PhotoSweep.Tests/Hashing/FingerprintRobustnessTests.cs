@@ -26,9 +26,26 @@ public class FingerprintRobustnessTests(ITestOutputHelper output)
     {
         var data = new TheoryData<string, string>();
         foreach (var name in new[] { "astronaut", "chelsea", "coffee" })
-        foreach (var variant in new[] { "_half.jpg", "_q50.jpg", ".png", "_exif6.jpg" })
+        foreach (var variant in new[] { "_half.jpg", "_q50.jpg", ".png", "_exif6.jpg", "_harsh.jpg" })
             data.Add(name, name + variant);
         return data;
+    }
+
+    // The mild edits above all hash to distance 0, which would also happen if the tolerance were never
+    // exercised. The harsh variant (quarter size + brighter + JPEG q20) must actually move some bits,
+    // proving the "same" test above is checking a real non-zero distance against the limit.
+    [Fact]
+    public void Harsh_variants_move_at_least_one_bit()
+    {
+        var total = 0;
+        foreach (var name in new[] { "astronaut", "chelsea", "coffee" })
+        {
+            var original = Fingerprint(name + ".jpg");
+            var harsh = Fingerprint(name + "_harsh.jpg");
+            total += Hamming.Distance(original.PHash, harsh.PHash) + Hamming.Distance(original.DHash, harsh.DHash);
+        }
+
+        Assert.True(total > 0, "harsh variants hashed identically to their originals; the test images are too gentle");
     }
 
     [Theory]
