@@ -9,9 +9,14 @@ namespace PhotoSweep.Presentation;
 /// </summary>
 public sealed partial class MainViewModel : ObservableObject
 {
-    public MainViewModel(IFolderPicker folderPicker, IKnownFolders knownFolders)
+    private readonly IScanService _scanService;
+    private readonly TimeProvider _time;
+
+    public MainViewModel(IFolderPicker folderPicker, IKnownFolders knownFolders, IScanService scanService, TimeProvider? time = null)
     {
-        Start = new StartViewModel(folderPicker, knownFolders, request => CurrentPage = new ScanningViewModel(request, GoToStart));
+        _scanService = scanService;
+        _time = time ?? TimeProvider.System;
+        Start = new StartViewModel(folderPicker, knownFolders, StartScan);
         _currentPage = Start;
     }
 
@@ -20,6 +25,22 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private object _currentPage;
+
+    /// <summary>
+    /// Called when the window is closing. Completes straight away unless a scan is running; then it cancels the scan
+    /// and completes once the scan has stopped and saved its cache.
+    /// </summary>
+    public Task PrepareToCloseAsync() =>
+        CurrentPage is ScanningViewModel scanning ? scanning.CancelAndWaitAsync() : Task.CompletedTask;
+
+    private void StartScan(ScanRequest request)
+    {
+        var scanning = new ScanningViewModel(request, _scanService, GoToStart, ShowResults, _time);
+        CurrentPage = scanning;
+        _ = scanning.RunAsync(); // never throws: every outcome becomes a page state or a navigation
+    }
+
+    private void ShowResults(ScanOutcome outcome) => CurrentPage = new ResultsViewModel(outcome, GoToStart);
 
     private void GoToStart() => CurrentPage = Start;
 }

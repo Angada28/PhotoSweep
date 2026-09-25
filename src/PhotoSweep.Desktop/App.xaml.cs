@@ -1,6 +1,9 @@
+using System.ComponentModel;
 using System.Windows;
+using PhotoSweep.Core.Scanning;
 using PhotoSweep.Desktop.Services;
 using PhotoSweep.Presentation;
+using PhotoSweep.Presentation.Services;
 
 namespace PhotoSweep.Desktop;
 
@@ -10,11 +13,41 @@ namespace PhotoSweep.Desktop;
 /// </summary>
 public partial class App : Application
 {
+    private MainViewModel? _main;
+    private bool _readyToClose;
+    private bool _waitingToClose;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        var main = new MainViewModel(new WpfFolderPicker(), new WindowsKnownFolders());
-        new MainWindow { DataContext = main }.Show();
+        _main = new MainViewModel(new WpfFolderPicker(), new WindowsKnownFolders(), new ScanService(ScanCache.DefaultPath));
+        var window = new MainWindow { DataContext = _main };
+        window.Closing += OnMainWindowClosing;
+        window.Show();
+    }
+
+    /// <summary>
+    /// Closing mid-scan: hold the window open, let the view-model cancel the scan and wait for it to save its cache,
+    /// then close for real. The page shows "Cancelling…" meanwhile. Without this, the process could exit while the
+    /// scan's worker threads are still running and lose the work since the last save.
+    /// </summary>
+    private async void OnMainWindowClosing(object? sender, CancelEventArgs e)
+    {
+        if (_readyToClose || _main is null)
+            return;
+
+        var pending = _main.PrepareToCloseAsync();
+        if (pending.IsCompleted)
+            return;
+
+        e.Cancel = true;
+        if (_waitingToClose)
+            return; // closed again while already waiting
+
+        _waitingToClose = true;
+        await pending; // never throws: the scanning page turns every outcome into a state
+        _readyToClose = true;
+        ((Window)sender!).Close();
     }
 }

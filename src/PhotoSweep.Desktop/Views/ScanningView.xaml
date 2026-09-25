@@ -1,18 +1,72 @@
 <UserControl x:Class="PhotoSweep.Desktop.Views.ScanningView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- Placeholder until Phase 8 builds the real scanning page. -->
+    <!-- Three panels, one per state, each shown by a bool from the view-model. -->
     <DockPanel Margin="24">
-        <Button DockPanel.Dock="Bottom" Content="Back" Command="{Binding BackCommand}"
-                HorizontalAlignment="Left" Padding="16,4" Margin="0,16,0,0" />
-        <StackPanel>
-            <TextBlock Text="Scanning…" FontSize="22" FontWeight="SemiBold" />
-            <TextBlock Margin="0,8,0,0">
-                <Run Text="Strictness:" />
-                <Run Text="{Binding LevelTitle, Mode=OneWay}" />
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+            <TextBlock Text="{Binding Heading}" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Foreground="Gray" Margin="0,4,0,0">
+                <Run Text="Time elapsed:" />
+                <Run Text="{Binding ElapsedText, Mode=OneWay}" />
             </TextBlock>
-            <TextBlock Text="Folders:" Margin="0,8,0,0" />
-            <ItemsControl ItemsSource="{Binding Folders}" Margin="12,4,0,0" />
         </StackPanel>
+
+        <Grid>
+            <!-- Running / cancelling -->
+            <DockPanel Visibility="{Binding ShowProgress, Converter={StaticResource BoolToVisibility}}">
+                <Button DockPanel.Dock="Bottom" Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True"
+                        HorizontalAlignment="Right" Padding="24,4" />
+                <StackPanel>
+                    <ProgressBar Height="16" Minimum="0" Maximum="100"
+                                 IsIndeterminate="{Binding IsIndeterminate}" Value="{Binding Percent, Mode=OneWay}" />
+                    <Grid Margin="0,16,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition /><RowDefinition /><RowDefinition /><RowDefinition />
+                        </Grid.RowDefinitions>
+                        <Grid.Resources>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Margin" Value="0,2,24,2" />
+                            </Style>
+                        </Grid.Resources>
+                        <TextBlock Grid.Row="0" Text="Photos found" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Found, StringFormat=N0}" />
+                        <TextBlock Grid.Row="1" Text="Checked" />
+                        <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Checked, StringFormat=N0}" />
+                        <TextBlock Grid.Row="2" Text="Remembered from last time" />
+                        <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding FromCache, StringFormat=N0}" />
+                        <TextBlock Grid.Row="3" Text="Couldn't read" />
+                        <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Errors, StringFormat=N0}" />
+                    </Grid>
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Online-only files were skipped: the user decides. -->
+            <DockPanel Visibility="{Binding ShowOnlineOnlyChoice, Converter={StaticResource BoolToVisibility}}">
+                <Button DockPanel.Dock="Bottom" Content="Cancel" Command="{Binding CancelCommand}"
+                        HorizontalAlignment="Right" Padding="24,4" />
+                <StackPanel>
+                    <TextBlock Text="{Binding OnlineOnlyMessage}" TextWrapping="Wrap" />
+                    <TextBlock Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,16"
+                               Text="Nothing has been downloaded. PhotoSweep only reads cloud files if you ask it to." />
+                    <Button Content="Continue without them" Command="{Binding ContinueWithoutCommand}" IsDefault="True"
+                            HorizontalAlignment="Left" Padding="16,4" />
+                    <Button Content="Download and scan them too" Command="{Binding DownloadAndScanCommand}"
+                            HorizontalAlignment="Left" Padding="16,4" Margin="0,12,0,0" />
+                    <TextBlock Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,0"
+                               Text="This downloads those files from the cloud to this PC, which uses disk space and can take a while. Photos already checked aren't read again." />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- Failed -->
+            <DockPanel Visibility="{Binding ShowError, Converter={StaticResource BoolToVisibility}}">
+                <Button DockPanel.Dock="Bottom" Content="Back" Command="{Binding BackCommand}"
+                        HorizontalAlignment="Left" Padding="24,4" />
+                <TextBlock Text="{Binding ErrorMessage}" TextWrapping="Wrap" />
+            </DockPanel>
+        </Grid>
     </DockPanel>
 </UserControl>

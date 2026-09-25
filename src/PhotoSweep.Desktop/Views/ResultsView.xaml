@@ -1,0 +1,18 @@
+<UserControl x:Class="PhotoSweep.Desktop.Views.ResultsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Placeholder until Phase 9 builds the real results page. -->
+    <DockPanel Margin="24">
+        <Button DockPanel.Dock="Bottom" Content="Back" Command="{Binding BackCommand}"
+                HorizontalAlignment="Left" Padding="16,4" Margin="0,16,0,0" />
+        <StackPanel>
+            <TextBlock Text="Results" FontSize="22" FontWeight="SemiBold" />
+            <TextBlock Text="{Binding Summary}" FontSize="16" Margin="0,12,0,0" />
+            <TextBlock Text="{Binding SpaceText}" Margin="0,4,0,0" />
+            <StackPanel Margin="0,16,0,0" Visibility="{Binding HasUnreadableFolders, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="These folders couldn't be read and were skipped:" Foreground="DarkRed" />
+                <ItemsControl ItemsSource="{Binding UnreadableFolders}" Margin="12,4,0,0" />
+            </StackPanel>
+        </StackPanel>
+    </DockPanel>
+</UserControl>
