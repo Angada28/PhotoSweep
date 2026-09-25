@@ -10,6 +10,8 @@ namespace PhotoSweep.Presentation;
 public sealed partial class MainViewModel : ObservableObject
 {
     private readonly IScanService _scanService;
+    private readonly ICleanupService _cleanup;
+    private readonly IShellService _shell;
     private readonly IFileAvailability _availability;
     private readonly TimeProvider _time;
 
@@ -17,10 +19,14 @@ public sealed partial class MainViewModel : ObservableObject
         IFolderPicker folderPicker,
         IKnownFolders knownFolders,
         IScanService scanService,
+        ICleanupService cleanup,
+        IShellService shell,
         IFileAvailability availability,
         TimeProvider? time = null)
     {
         _scanService = scanService;
+        _cleanup = cleanup;
+        _shell = shell;
         _availability = availability;
         _time = time ?? TimeProvider.System;
         Start = new StartViewModel(folderPicker, knownFolders, StartScan);
@@ -34,11 +40,15 @@ public sealed partial class MainViewModel : ObservableObject
     private object _currentPage;
 
     /// <summary>
-    /// Called when the window is closing. Completes straight away unless a scan is running; then it cancels the scan
-    /// and completes once the scan has stopped and saved its cache.
+    /// Called when the window is closing. Completes straight away unless something is running: a scan is cancelled and
+    /// awaited until it has saved its cache; a move or undo is awaited until it finishes (it isn't stopped half-way).
     /// </summary>
-    public Task PrepareToCloseAsync() =>
-        CurrentPage is ScanningViewModel scanning ? scanning.CancelAndWaitAsync() : Task.CompletedTask;
+    public Task PrepareToCloseAsync() => CurrentPage switch
+    {
+        ScanningViewModel scanning => scanning.CancelAndWaitAsync(),
+        ResultsViewModel results => results.WaitForCleanupAsync(),
+        _ => Task.CompletedTask,
+    };
 
     private void StartScan(ScanRequest request)
     {
@@ -47,7 +57,7 @@ public sealed partial class MainViewModel : ObservableObject
         _ = scanning.RunAsync(); // never throws: every outcome becomes a page state or a navigation
     }
 
-    private void ShowResults(ScanOutcome outcome) => CurrentPage = new ResultsViewModel(outcome, _scanService, _availability, GoToStart, _time);
+    private void ShowResults(ScanOutcome outcome) => CurrentPage = new ResultsViewModel(outcome, _scanService, _cleanup, _shell, _availability, GoToStart, _time);
 
     private void GoToStart() => CurrentPage = Start;
 }

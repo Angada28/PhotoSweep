@@ -17,6 +17,8 @@ namespace PhotoSweep.Core.Cleanup;
 internal static partial class NoCopyMove
 {
     private const int ErrorAccessDenied = 5;
+    private const int ErrorSharingViolation = 32;
+    private const int ErrorLockViolation = 33;
     private const int ErrorFileExists = 80;
     private const int ErrorAlreadyExists = 183;
 
@@ -43,6 +45,10 @@ internal static partial class NoCopyMove
 
     public static bool IsAlreadyExists(IOException e) =>
         e.HResult == HResultFromWin32(ErrorFileExists) || e.HResult == HResultFromWin32(ErrorAlreadyExists);
+
+    /// <summary>True when another process has the file open (sharing or lock violation), as opposed to any other failure.</summary>
+    public static bool IsInUse(Exception e) =>
+        e is IOException && (e.HResult == HResultFromWin32(ErrorSharingViolation) || e.HResult == HResultFromWin32(ErrorLockViolation));
 
     // HRESULT_FROM_WIN32: the same mapping .NET uses for its own IOExceptions.
     private static int HResultFromWin32(int error) => unchecked((int)0x80070000 | error);

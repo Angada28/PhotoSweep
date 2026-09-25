@@ -123,7 +123,7 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    failures.Add(new(original, CleanupFailureReason.IoError, ex.Message)); // entry kept, so undo can retry
+                    failures.Add(new(original, IoReason(ex), ex.Message)); // entry kept, so undo can retry
                 }
             }
 
@@ -167,7 +167,7 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
         {
             manifest.Entries.Remove(entry);
             manifest.TrySave(); // if this fails, the stale entry is harmless: undo sees the original unchanged and drops it
-            return new(move.File.Path, CleanupFailureReason.IoError, ex.Message);
+            return new(move.File.Path, IoReason(ex), ex.Message);
         }
     }
 
@@ -200,6 +200,10 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
 
         throw new IOException($"No free name to restore {original} to.");
     }
+
+    /// <summary>"In use" is split out because it's the one I/O failure worth retrying as-is.</summary>
+    private static CleanupFailureReason IoReason(Exception ex) =>
+        NoCopyMove.IsInUse(ex) ? CleanupFailureReason.InUse : CleanupFailureReason.IoError;
 
     private static bool IsUnchangedSinceScan(ScannedFile file) => Matches(file.Path, file.SizeBytes, file.LastWriteUtc);
 

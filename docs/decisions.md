@@ -3,6 +3,35 @@
 Decisions that were measured or argued rather than obvious, newest first. Each records what was chosen, the
 evidence, and what would make us revisit it.
 
+## 2026-09-25: The results page works out what to show from the scan; undo is a stack that lasts as long as the page
+
+**Worked out, not edited in place.** After a move the page doesn't delete rows. It keeps the scan paths moved to the
+review folder and, for photos undo put back as "name (2).jpg", their new paths. The rows are always
+`RemainingGroups.Apply(groups for the level, moved out, renamed)`: moved photos left out, groups with fewer than two
+photos dropped. Moves, undos (in any order) and strictness changes then all go through one pure function. Editing rows
+in place would break on the first re-group, because the grouper works from the scan, which still lists the moved
+photos. Selection is carried over by path, and photos put back by undo come back selected.
+
+**When the suggested keeper is moved** (the user kept other copies instead), the best-ranked photo left stands in as
+keeper. That group suggests nothing, because the other members' match kinds were measured against the old keeper, not
+the new one. *Alternative:* re-rank or re-group what's left. Rejected for now, because it could reshuffle groups the user
+is working through.
+
+**What stays selected after a failed move.** Only "in use by another app" (`CleanupFailureReason.InUse`, split out of
+`IoError` in Core from `ERROR_SHARING_VIOLATION`/`ERROR_LOCK_VIOLATION`) stays selected, because clicking Move again
+after closing that app will work. Changed since the scan, missing, kept copy missing and other I/O errors are deselected
+and the page says to scan again, because a retry would fail the same way.
+
+**Undo stack, this page only.** Each move is a batch; the undo bar offers the latest, then the one before. Leaving the
+page drops the stack (files stay in `_PhotoSweep Removed`), so Back asks first when something could still be undone.
+`ReviewFolder.FindBatches` can already find batches on disk, but there's no UI for it yet (see polish list).
+
+**Closing mid-move waits** for the batch to finish rather than cancelling it. The write-ahead manifest would make a
+crash safe, but finishing leaves nothing for the next undo to tidy up.
+
+**Out of scope for now:** undoing batches from earlier sessions (`FindBatches`), and moving Takeout `.json` sidecars
+with their photos (see the open issue below).
+
 ## 2026-09-25: Results-page thumbnails: ImageSharp, checked for cloud files twice, settle delay before decoding
 
 **ImageSharp, not WIC.** WPF's own decoder (WIC) is faster and shows HEIC when the Windows codec is installed, but
@@ -166,3 +195,9 @@ moves only the photo, so its sidecar stays behind in the library. Decide whether
 - **`name.0.jpg` isn't recognised as a copy name.** Some apps save a second copy as `X.0.jpg`, and it can win the
   keeper ranking on age. Adding a `\.\d+$` pattern is cheap but could match real file names, so it needs testing
   against a real library first.
+
+## Polish list
+
+- **Restore earlier clean-ups (`FindBatches`).** Undo only covers batches moved on the current results page. A
+  "Review folder" page could list every batch still in `_PhotoSweep Removed` (via `ReviewFolder.FindBatches`) and undo
+  any of them.

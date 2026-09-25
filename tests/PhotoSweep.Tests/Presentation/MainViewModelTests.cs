@@ -9,7 +9,10 @@ public class MainViewModelTests
     private readonly FakeFolderPicker _picker = new();
     private readonly FakeScanService _service = new();
 
-    private MainViewModel Create() => new(_picker, new FakeKnownFolders(), _service, new FakeFileAvailability(), new ManualTimeProvider());
+    private readonly FakeCleanupService _cleanup = new();
+
+    private MainViewModel Create() =>
+        new(_picker, new FakeKnownFolders(), _service, _cleanup, new FakeShellService(), new FakeFileAvailability(), new ManualTimeProvider());
 
     [Fact]
     public void Starts_on_the_start_page()
@@ -97,6 +100,30 @@ public class MainViewModelTests
         Assert.True(_service.LastScan.Token.IsCancellationRequested);
         Assert.False(closing.IsCompleted);
         _service.LastScan.StopCancelled();
+        Assert.True(closing.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public void Closing_mid_move_waits_for_the_move_to_finish()
+    {
+        using var sync = InlineSynchronizationContext.Install();
+        var main = Create();
+        _picker.WillPick(@"C:\Photos");
+        main.Start.AddFolderCommand.Execute(null);
+        main.Start.ScanCommand.Execute(null);
+        var a = Photo(@"C:\Photos\a.jpg");
+        var b = Photo(@"C:\Photos\b.jpg");
+        _service.LastScan.Complete(a, b);
+        _service.LastGrouping.Complete(Group(a, b));
+        var results = (ResultsViewModel)main.CurrentPage;
+        Assert.True(main.PrepareToCloseAsync().IsCompleted); // nothing running on the results page
+
+        results.MoveCommand.Execute(null);
+        results.ConfirmMoveCommand.Execute(null);
+        var closing = main.PrepareToCloseAsync();
+
+        Assert.False(closing.IsCompleted);
+        _cleanup.LastMove.Complete();
         Assert.True(closing.IsCompletedSuccessfully);
     }
 }

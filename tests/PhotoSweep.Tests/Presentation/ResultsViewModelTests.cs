@@ -13,13 +13,15 @@ public class ResultsViewModelTests
 
     private readonly FakeScanService _service = new();
     private readonly FakeFileAvailability _availability = new();
+    private readonly FakeCleanupService _cleanup = new();
+    private readonly FakeShellService _shell = new();
 
     private ResultsViewModel Results(MatchLevel level, IReadOnlyList<PhotoGroup> groups, Action? goBack = null, string[]? unreadable = null, ScanResult? scan = null)
     {
         var request = new ScanRequest(new ScanOptions { Folders = [@"C:\Photos"] }, level);
         scan ??= new ScanResult(groups.SelectMany(g => g.Members).Select(m => m.File), cacheHits: 0);
         var outcome = new ScanOutcome(request, scan, groups, unreadable ?? []);
-        return new ResultsViewModel(outcome, _service, _availability, goBack ?? (() => { }), new FixedTime(DateTimeOffset.UnixEpoch));
+        return new ResultsViewModel(outcome, _service, _cleanup, _shell, _availability, goBack ?? (() => { }), new FixedTime(DateTimeOffset.UnixEpoch));
     }
 
     private static readonly PhotoGroup[] TwoGroups =

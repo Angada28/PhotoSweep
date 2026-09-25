@@ -22,15 +22,20 @@ public partial class App : Application
         base.OnStartup(e);
 
         _main = new MainViewModel(
-            new WpfFolderPicker(), new WindowsKnownFolders(), new ScanService(ScanCache.DefaultPath), new DiskFileAvailability());
+            new WpfFolderPicker(),
+            new WindowsKnownFolders(),
+            new ScanService(ScanCache.DefaultPath),
+            new CleanupService(),
+            new ExplorerShellService(),
+            new DiskFileAvailability());
         var window = new MainWindow { DataContext = _main };
         window.Closing += OnMainWindowClosing;
         window.Show();
     }
 
     /// <summary>
-    /// Closing mid-scan: hold the window open, let the view-model cancel the scan and wait for it to save its cache,
-    /// then close for real. The page shows "Cancelling…" meanwhile. Without this, the process could exit while the
+    /// Closing mid-scan (or mid-move): hold the window open, let the view-model cancel the scan and wait for it to save
+    /// its cache (or let the move finish), then close for real. The page shows "Cancelling…" or "Moving…" meanwhile. Without this, the process could exit while the
     /// scan's worker threads are still running and lose the work since the last save.
     /// </summary>
     private async void OnMainWindowClosing(object? sender, CancelEventArgs e)
@@ -47,7 +52,7 @@ public partial class App : Application
             return; // closed again while already waiting
 
         _waitingToClose = true;
-        await pending; // never throws: the scanning page turns every outcome into a state
+        await pending; // never throws: the pages turn every outcome into a state
         _readyToClose = true;
         ((Window)sender!).Close();
     }

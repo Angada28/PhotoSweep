@@ -8,6 +8,7 @@ namespace PhotoSweep.Presentation;
 /// <summary>
 /// The results page: the duplicate groups, largest saving first, with the photos to remove selected. The strictness
 /// can be changed here; that re-groups the finished scan (no re-scan) and resets the selection to the policy.
+/// Moving to the review folder and undo live in <c>ResultsViewModel.Cleanup.cs</c>.
 /// </summary>
 /// <remarks>
 /// Threading: like <see cref="ScanningViewModel"/>, this class runs on the UI thread only. Grouping runs on the thread
@@ -16,6 +17,8 @@ namespace PhotoSweep.Presentation;
 public sealed partial class ResultsViewModel : ObservableObject
 {
     private readonly IScanService _scanService;
+    private readonly ICleanupService _cleanup;
+    private readonly IShellService _shell;
     private readonly IFileAvailability _availability;
     private readonly Action _goBack;
     private readonly TimeZoneInfo _localZone;
@@ -27,16 +30,25 @@ public sealed partial class ResultsViewModel : ObservableObject
     private CancellationTokenSource? _regrouping;
     private bool _bulkChange;
 
-    public ResultsViewModel(ScanOutcome outcome, IScanService scanService, IFileAvailability availability, Action goBack, TimeProvider? time = null)
+    public ResultsViewModel(
+        ScanOutcome outcome,
+        IScanService scanService,
+        ICleanupService cleanup,
+        IShellService shell,
+        IFileAvailability availability,
+        Action goBack,
+        TimeProvider? time = null)
     {
         Outcome = outcome;
         _scanService = scanService;
+        _cleanup = cleanup;
+        _shell = shell;
         _availability = availability;
         _goBack = goBack;
         _localZone = (time ?? TimeProvider.System).LocalTimeZone;
         _groupsByLevel[outcome.Request.Level] = outcome.Groups;
         _selectedStrictness = StrictnessOption.For(outcome.Request.Level);
-        Show(outcome.Request.Level, outcome.Groups);
+        Show(outcome.Request.Level, selection: null);
     }
 
     public ScanOutcome Outcome { get; }
@@ -48,11 +60,13 @@ public sealed partial class ResultsViewModel : ObservableObject
 
     /// <summary>Largest <see cref="GroupViewModel.FreeableBytes"/> first.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(GroupCount), nameof(ExtraCopies), nameof(ExtraBytes), nameof(Summary), nameof(SpaceText), nameof(IsEmpty))]
+    [NotifyPropertyChangedFor(nameof(GroupCount), nameof(ExtraCopies), nameof(ExtraBytes), nameof(Summary), nameof(SpaceText), nameof(IsEmpty), nameof(EmptyText))]
     [NotifyCanExecuteChangedFor(nameof(SelectSuggestedCommand))]
     private IReadOnlyList<GroupViewModel> _groups = [];
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBusy), nameof(BusyText))]
+    [NotifyCanExecuteChangedFor(nameof(MoveCommand))]
     private bool _isRegrouping;
 
     [ObservableProperty]
@@ -60,7 +74,7 @@ public sealed partial class ResultsViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SelectionText))]
-    [NotifyCanExecuteChangedFor(nameof(ClearSelectionCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ClearSelectionCommand), nameof(MoveCommand))]
     private int _selectedCount;
 
     [ObservableProperty]
@@ -82,6 +96,8 @@ public sealed partial class ResultsViewModel : ObservableObject
 
     public int GroupCount => Groups.Count;
 
+    public string EmptyText => _movedOut.Count > 0 ? "No duplicates left at this strictness." : "No duplicates found at this strictness.";
+
     public bool IsEmpty => Groups.Count == 0;
 
     /// <summary>Every member except each group's keeper.</summary>
@@ -90,7 +106,7 @@ public sealed partial class ResultsViewModel : ObservableObject
     public long ExtraBytes => Groups.Sum(g => g.FreeableBytes);
 
     public string Summary => GroupCount == 0
-        ? "No duplicates found."
+        ? (_movedOut.Count > 0 ? "No duplicates left." : "No duplicates found.")
         : $"{DisplayText.Count(GroupCount, "group", "groups")} with {DisplayText.Count(ExtraCopies, "extra copy", "extra copies")}";
 
     /// <summary>
@@ -119,22 +135,15 @@ public sealed partial class ResultsViewModel : ObservableObject
 
     public bool HasNotIncluded => HasUnreadableFolders || HasCloudSkipped;
 
-    private bool CanSelectSuggested => Groups.Any(g => g.HasSuggestions);
+    private bool CanSelectSuggested => !IsWorking && Groups.Any(g => g.HasSuggestions);
 
     [RelayCommand(CanExecute = nameof(CanSelectSuggested))]
     private void SelectSuggested() => ChangeAll(g => g.SelectSuggested());
 
-    private bool CanClearSelection => SelectedCount > 0;
+    private bool CanClearSelection => !IsWorking && SelectedCount > 0;
 
     [RelayCommand(CanExecute = nameof(CanClearSelection))]
     private void ClearSelection() => ChangeAll(g => g.Clear());
-
-    [RelayCommand]
-    private void Back()
-    {
-        _regrouping?.Cancel();
-        _goBack();
-    }
 
     private async Task RegroupAsync(MatchLevel level)
     {
@@ -142,10 +151,10 @@ public sealed partial class ResultsViewModel : ObservableObject
         _regrouping = null;
         ErrorMessage = "";
 
-        if (_groupsByLevel.TryGetValue(level, out var cached))
+        if (_groupsByLevel.ContainsKey(level))
         {
             IsRegrouping = false;
-            Show(level, cached);
+            Show(level, selection: null);
             return;
         }
 
@@ -159,7 +168,7 @@ public sealed partial class ResultsViewModel : ObservableObject
                 return; // superseded while grouping; a late result must not replace the newer one
 
             _groupsByLevel[level] = groups;
-            Show(level, groups);
+            Show(level, selection: null);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -183,12 +192,15 @@ public sealed partial class ResultsViewModel : ObservableObject
         }
     }
 
-    /// <summary>Builds the rows for <paramref name="groups"/> with the policy's selection. Any earlier selection is dropped.</summary>
-    private void Show(MatchLevel level, IReadOnlyList<PhotoGroup> groups)
+    /// <summary>
+    /// Builds the rows for the level's groups, leaving out photos moved to the review folder. With a null
+    /// <paramref name="selection"/> every group starts at the policy's suggestions; otherwise those paths are selected.
+    /// </summary>
+    private void Show(MatchLevel level, IReadOnlySet<string>? selection)
     {
         _bulkChange = true;
-        var rows = groups
-            .Select(g => new GroupViewModel(g, level, _availability, _localZone, OnSelectionChanged))
+        var rows = RemainingGroups.Apply(_groupsByLevel[level], _movedOut, _renamed)
+            .Select(g => new GroupViewModel(g.Group, level, g.KeeperMoved, selection, _availability, _localZone, OnSelectionChanged))
             .OrderByDescending(g => g.FreeableBytes)
             .ThenBy(g => g.Group.Keeper.File.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -214,12 +226,14 @@ public sealed partial class ResultsViewModel : ObservableObject
         if (_bulkChange)
             return;
 
+        CloseConfirmation();
         SelectedCount += count;
         SelectedBytes += bytes;
     }
 
     private void RecountSelection()
     {
+        CloseConfirmation(); // its numbers describe the old selection
         SelectedCount = Groups.Sum(g => g.SelectedCount);
         SelectedBytes = Groups.Sum(g => g.SelectedBytes);
     }

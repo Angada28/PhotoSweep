@@ -11,7 +11,10 @@ public enum CleanupFailureReason
     /// <summary>The file isn't where it should be (deleted, or emptied out of the review folder).</summary>
     NotFound,
 
-    /// <summary>The move itself failed: file in use, access denied, different volume, manifest not writable.</summary>
+    /// <summary>Another app has the file open, so Windows refused to move it. Worth retrying once that app lets go.</summary>
+    InUse,
+
+    /// <summary>The move itself failed for another reason: access denied, different volume, manifest not writable.</summary>
     IoError,
 }
 

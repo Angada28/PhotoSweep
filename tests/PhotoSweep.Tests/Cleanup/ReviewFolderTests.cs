@@ -74,7 +74,7 @@ public class ReviewFolderTests : IDisposable
 
         Assert.Equal([fine.Path], result.Moved.Select(m => m.OriginalPath));
         Assert.Equal(
-            [(locked.Path, CleanupFailureReason.IoError), (gone.Path, CleanupFailureReason.NotFound)],
+            [(locked.Path, CleanupFailureReason.InUse), (gone.Path, CleanupFailureReason.NotFound)],
             result.Failures.Select(f => (f.Path, f.Reason)));
         Assert.True(File.Exists(locked.Path));
         Assert.Equal(["fine.jpg"], ManifestEntries(Assert.Single(result.Batch.ManifestPaths)));
@@ -280,7 +280,7 @@ public class ReviewFolderTests : IDisposable
         using (new FileStream(moved.Moved[0].ReviewPath, FileMode.Open, FileAccess.Read, FileShare.None))
             first = _review.Undo(moved.Batch);
 
-        Assert.Equal((locked.Path, CleanupFailureReason.IoError), (Assert.Single(first.Failures).Path, first.Failures[0].Reason));
+        Assert.Equal((locked.Path, CleanupFailureReason.InUse), (Assert.Single(first.Failures).Path, first.Failures[0].Reason));
         Assert.Equal([copy.Path], first.Restored.Select(r => r.RestoredPath));
         var remaining = Assert.Single(_review.FindBatches([_temp.Root]));
         Assert.Equal(1, remaining.FileCount);

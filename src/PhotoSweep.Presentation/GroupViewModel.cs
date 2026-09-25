@@ -18,15 +18,35 @@ public sealed class GroupViewModel
     private readonly Action<int, long> _selectionChanged;
     private readonly HashSet<PhotoViewModel> _suggested;
 
-    internal GroupViewModel(PhotoGroup group, MatchLevel level, IFileAvailability availability, TimeZoneInfo localZone, Action<int, long> selectionChanged)
+    /// <param name="suggestNothing">True when the scan's keeper was moved: the others' match kinds describe the old keeper, so none is suggested.</param>
+    /// <param name="selection">Paths to start selected, carried over from before a move or undo. Null means the policy's suggestions.</param>
+    internal GroupViewModel(
+        PhotoGroup group,
+        MatchLevel level,
+        bool suggestNothing,
+        IReadOnlySet<string>? selection,
+        IFileAvailability availability,
+        TimeZoneInfo localZone,
+        Action<int, long> selectionChanged)
     {
         Group = group;
         _selectionChanged = selectionChanged;
         Photos = group.Members.Select(m => new PhotoViewModel(m, this, availability, localZone)).ToList();
-        _suggested = Photos.Where(p => PreselectionPolicy.IsSuggested(p.Member, level)).ToHashSet();
+        _suggested = suggestNothing ? [] : Photos.Where(p => PreselectionPolicy.IsSuggested(p.Member, level)).ToHashSet();
         FreeableBytes = group.Members.Skip(1).Sum(m => m.File.SizeBytes);
         SizeText = $"{DisplayText.Count(Photos.Count, "photo", "photos")} · {DisplayText.Bytes(FreeableBytes)} besides the keeper";
-        SelectSuggested();
+
+        if (selection is null)
+        {
+            SelectSuggested();
+            return;
+        }
+
+        foreach (var photo in Photos)
+        {
+            if (selection.Contains(photo.File.Path) && CanSelectAnother) // the keep-one rule holds for carried-over selections too
+                Set(photo, true);
+        }
     }
 
     public PhotoGroup Group { get; }
