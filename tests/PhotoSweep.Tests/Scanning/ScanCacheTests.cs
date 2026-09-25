@@ -1,4 +1,7 @@
+using System.Text.Json;
 using PhotoSweep.Core.Scanning;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 
 namespace PhotoSweep.Tests.Scanning;
 
@@ -32,6 +35,54 @@ public class ScanCacheTests : IDisposable
         Assert.Equal(2, second.CacheHits);
         Assert.Equal(originalSha, second.Files.Single(f => f.Path == path).Sha256);
         Assert.Equal(first.Files.Select(f => f.Fingerprint), second.Files.Select(f => f.Fingerprint));
+        Assert.Equal(first.Files.Select(f => f.Details), second.Files.Select(f => f.Details));
+        Assert.All(second.Files, f => Assert.NotNull(f.Details));
+    }
+
+    [Fact]
+    public async Task Camera_details_survive_the_cache()
+    {
+        var path = Path.Combine(_temp.Root, "camera.jpg");
+        using (var image = Image.Load(TempPhotoFolder.ReadTestPhoto("coffee.jpg")))
+        {
+            var exif = image.Metadata.ExifProfile ??= new ExifProfile();
+            exif.SetValue(ExifTag.Model, "Pixel 8");
+            exif.SetValue(ExifTag.DateTimeOriginal, "2024:01:02 03:04:05");
+            image.SaveAsJpeg(path);
+        }
+
+        var first = Assert.Single((await Scan()).Files).Details;
+        var second = await Scan();
+
+        Assert.Equal(1, second.CacheHits);
+        Assert.Equal(first, Assert.Single(second.Files).Details);
+        Assert.Equal("Pixel 8", first!.CameraModel);
+    }
+
+    // Version-1 entries have no image details. Reusing them would give files with a fingerprint but no
+    // resolution, and the keeper ranking would silently get worse, so they must be re-read instead.
+    [Fact]
+    public async Task Version_1_cache_is_ignored_even_when_its_entries_match()
+    {
+        var path = _temp.AddPhoto("coffee.jpg");
+        var info = new FileInfo(path);
+        var entry = new Dictionary<string, object>
+        {
+            ["Size"] = info.Length,
+            ["LastWriteUtcTicks"] = info.LastWriteTimeUtc.Ticks,
+            ["Status"] = "Ok",
+            ["Sha256"] = "OLD",
+            ["PHash"] = 1,
+            ["DHash"] = 2,
+        };
+        File.WriteAllText(_temp.CachePath, JsonSerializer.Serialize(
+            new { Version = 1, Entries = new Dictionary<string, object> { [path] = entry } }));
+
+        var result = await Scan();
+
+        Assert.Equal(0, result.CacheHits);
+        Assert.NotEqual("OLD", Assert.Single(result.Files).Sha256);
+        Assert.NotNull(result.Files[0].Details);
     }
 
     [Fact]

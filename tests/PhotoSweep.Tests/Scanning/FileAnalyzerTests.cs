@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using PhotoSweep.Core.Hashing;
 using PhotoSweep.Core.Scanning;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 
 namespace PhotoSweep.Tests.Scanning;
 
@@ -27,6 +28,50 @@ public class FileAnalyzerTests : IDisposable
         Assert.Null(result.Error);
     }
 
+    [Fact]
+    public async Task Photo_gets_its_resolution_and_no_camera_data_when_it_has_none()
+    {
+        var result = await Analyze(_temp.AddPhoto("astronaut.jpg"));
+
+        Assert.NotNull(result.Details);
+        Assert.Equal((256, 256), (result.Details.Width, result.Details.Height));
+        Assert.False(result.Details.HasCameraData);
+    }
+
+    // The _exif6 file stores its pixels sideways (height > width) with an EXIF tag saying "rotate to display".
+    // Reporting the same landscape size as the upright original proves the orientation was applied.
+    [Fact]
+    public async Task Resolution_is_as_displayed_after_exif_rotation()
+    {
+        var upright = await Analyze(_temp.AddPhoto("chelsea.jpg"));
+        var sideways = await Analyze(_temp.AddPhoto("chelsea_exif6.jpg"));
+
+        Assert.True(upright.Details!.Width > upright.Details.Height);
+        Assert.Equal((upright.Details.Width, upright.Details.Height), (sideways.Details!.Width, sideways.Details.Height));
+    }
+
+    [Fact]
+    public async Task Camera_exif_is_read()
+    {
+        var path = Path.Combine(_temp.Root, "camera.jpg");
+        using (var image = Image.Load(Path.Combine(AppContext.BaseDirectory, "TestData", "Photos", "coffee.jpg")))
+        {
+            var exif = image.Metadata.ExifProfile ??= new ExifProfile();
+            exif.SetValue(ExifTag.Make, "Canon ");       // cameras often pad with spaces
+            exif.SetValue(ExifTag.Model, "Canon EOS R5");
+            exif.SetValue(ExifTag.DateTimeOriginal, "2019:07:14 16:02:31");
+            image.SaveAsJpeg(path);
+        }
+
+        var details = (await Analyze(path)).Details;
+
+        Assert.NotNull(details);
+        Assert.Equal("Canon", details.CameraMake);
+        Assert.Equal("Canon EOS R5", details.CameraModel);
+        Assert.Equal(new DateTime(2019, 7, 14, 16, 2, 31), details.DateTaken);
+        Assert.True(details.HasCameraData);
+    }
+
     [Theory]
     [InlineData("garbage.jpg")]
     [InlineData("phone.heic")] // ImageSharp 3.1 has no HEIC decoder
@@ -40,6 +85,7 @@ public class FileAnalyzerTests : IDisposable
         Assert.Contains("Unsupported", result.Error);
         Assert.NotNull(result.Sha256);
         Assert.Null(result.Fingerprint);
+        Assert.Null(result.Details);
     }
 
     // Cut off inside the headers: ImageSharp throws InvalidImageContentException. (Cut off later, e.g. half the

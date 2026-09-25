@@ -1,4 +1,5 @@
 using PhotoSweep.Core.Hashing;
+using PhotoSweep.Core.Imaging;
 
 namespace PhotoSweep.Core.Scanning;
 
@@ -30,6 +31,9 @@ public sealed record ScannedFile(string Path, long SizeBytes, DateTime LastWrite
 
     /// <summary>Perceptual fingerprint, present only when the image decoded.</summary>
     public ImageFingerprint? Fingerprint { get; init; }
+
+    /// <summary>Displayed size and camera EXIF, present only when the image decoded. Used to pick which copy to keep.</summary>
+    public ImageDetails? Details { get; init; }
 
     public string? Error { get; init; }
 

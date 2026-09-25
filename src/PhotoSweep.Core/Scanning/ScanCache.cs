@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using PhotoSweep.Core.Hashing;
+using PhotoSweep.Core.Imaging;
 
 namespace PhotoSweep.Core.Scanning;
 
@@ -12,7 +13,8 @@ namespace PhotoSweep.Core.Scanning;
 public sealed class ScanCache
 {
     /// <summary>Bump when the entry format or the hash algorithm changes; older cache files are then ignored.</summary>
-    public const int FormatVersion = 1;
+    /// <remarks>2: added image details (size, camera EXIF). Version-1 entries lack them, so they're re-read once.</remarks>
+    public const int FormatVersion = 2;
 
     private static readonly JsonSerializerOptions JsonOptions = new() { Converters = { new JsonStringEnumConverter() } };
 
@@ -62,6 +64,9 @@ public sealed class ScanCache
                 Status = e.Status,
                 Sha256 = e.Sha256,
                 Fingerprint = e is { PHash: { } p, DHash: { } d } ? new ImageFingerprint(p, d) : null,
+                Details = e is { Width: { } w, Height: { } h }
+                    ? new ImageDetails(w, h) { CameraMake = e.CameraMake, CameraModel = e.CameraModel, DateTaken = e.DateTaken }
+                    : null,
                 Error = e.Error,
             };
             return true;
@@ -89,6 +94,11 @@ public sealed class ScanCache
             Sha256 = file.Sha256,
             PHash = file.Fingerprint?.PHash,
             DHash = file.Fingerprint?.DHash,
+            Width = file.Details?.Width,
+            Height = file.Details?.Height,
+            CameraMake = file.Details?.CameraMake,
+            CameraModel = file.Details?.CameraModel,
+            DateTaken = file.Details?.DateTaken,
             Error = file.Error,
         };
     }
@@ -159,6 +169,11 @@ public sealed class ScanCache
         public string? Sha256 { get; init; }
         public ulong? PHash { get; init; }
         public ulong? DHash { get; init; }
+        public int? Width { get; init; }
+        public int? Height { get; init; }
+        public string? CameraMake { get; init; }
+        public string? CameraModel { get; init; }
+        public DateTime? DateTaken { get; init; }
         public string? Error { get; init; }
     }
 }

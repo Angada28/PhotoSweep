@@ -1,11 +1,13 @@
 using System.Security.Cryptography;
 using PhotoSweep.Core.Hashing;
+using PhotoSweep.Core.Imaging;
 using SixLabors.ImageSharp;
 
 namespace PhotoSweep.Core.Scanning;
 
 /// <summary>
-/// Reads one file: SHA-256 of its bytes (exact copies), then the perceptual fingerprint (look-alikes).
+/// Reads one file: SHA-256 of its bytes (exact copies), then the perceptual fingerprint (look-alikes), then the
+/// header details (resolution, camera EXIF) used to pick which copy to keep.
 /// Never throws for a bad file; every failure except cancellation becomes a per-file error in the result.
 /// </summary>
 /// <param name="fingerprint">
@@ -22,7 +24,8 @@ public sealed class FileAnalyzer(Func<Stream, ImageFingerprint>? fingerprint = n
         string? sha = null;
         try
         {
-            // One open, two reads: hash the whole file, rewind, decode. The second read is served from the OS cache.
+            // One open, three reads: hash the whole file, rewind and decode, rewind and read the header for size and
+            // EXIF. The later reads are served from the OS cache.
             await using var stream = new FileStream(file.Path, new FileStreamOptions
             {
                 Mode = FileMode.Open,
@@ -34,8 +37,10 @@ public sealed class FileAnalyzer(Func<Stream, ImageFingerprint>? fingerprint = n
             sha = Convert.ToHexString(await SHA256.HashDataAsync(stream, ct));
             stream.Position = 0;
             var fp = _fingerprint(stream);
+            stream.Position = 0;
+            var details = ImageDetails.Read(stream);
 
-            return result with { Status = ScanStatus.Ok, Sha256 = sha, Fingerprint = fp };
+            return result with { Status = ScanStatus.Ok, Sha256 = sha, Fingerprint = fp, Details = details };
         }
         catch (ImageFormatException ex)
         {
