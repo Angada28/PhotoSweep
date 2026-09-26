@@ -21,6 +21,10 @@ EXIF orientation 6, 50% + q30), hashes everything with `Fingerprinter` exactly a
 candidate limits, distance spreads, and the close "different original" pairs by path so they can be checked by eye
 (a library's own bursts and copies show up there).
 
+The variants are only needed while the run hashes them; the report doesn't link to them. They're big (full-size PNG
+and JPEG copies): 1.9 GB for the 300-photo run on `sweep-test` (2026-09-26, in the scratchpad's `eval\variants`).
+Delete `<out>/variants` once the report is written. A re-run with the same folder and seed regenerates them exactly.
+
 **review** groups the folder at `--p/--d` and draws up to `--per-bucket` pairs from each bucket of
 max(pHash, dHash): 0–2, 3–4, 5–6, 7–8. Byte-identical copies are left out. Open `<out>/review.html` in a browser,
 mark each pair Same/Different (keys S/D), then **Export labels**. Labels also survive a reload (localStorage), and
