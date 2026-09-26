@@ -1,7 +1,8 @@
 <UserControl x:Class="PhotoSweep.Desktop.Views.ResultsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:behaviors="clr-namespace:PhotoSweep.Desktop.Behaviors">
+             xmlns:behaviors="clr-namespace:PhotoSweep.Desktop.Behaviors"
+             xmlns:vm="clr-namespace:PhotoSweep.Presentation;assembly=PhotoSweep.Presentation">
     <UserControl.Resources>
         <SolidColorBrush x:Key="SelectedBrush" Color="#C62828" />
         <SolidColorBrush x:Key="SelectedBackground" Color="#FFF3F3" />
@@ -259,7 +260,8 @@
                     <Button DockPanel.Dock="Right" Content="Move to review folder&#x2026;" Command="{Binding MoveCommand}" Padding="16,4" Margin="8,0,0,0"
                             FontWeight="SemiBold" ToolTip="Moves the selected photos into a _PhotoSweep Removed folder. Nothing is deleted." />
                     <Button DockPanel.Dock="Right" Content="Clear selection" Command="{Binding ClearSelectionCommand}" Padding="12,4" Margin="8,0,0,0" />
-                    <Button DockPanel.Dock="Right" Content="Select all suggested" Command="{Binding SelectSuggestedCommand}" Padding="12,4" />
+                    <Button DockPanel.Dock="Right" Content="Select all suggested" Command="{Binding SelectSuggestedCommand}" Padding="12,4"
+                            ToolTip="Selects every byte-identical copy. Look-alikes are never selected automatically." />
                     <TextBlock Text="{Binding SelectionText}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </DockPanel>
             </Border>
@@ -301,6 +303,8 @@
                                         <Run Text="{Binding KeeperReason, Mode=OneWay}" />
                                     </TextBlock>
                                 </DockPanel>
+                                <TextBlock Text="{x:Static vm:GroupViewModel.LookAlikeNote}" Foreground="#555555" Margin="0,2,0,0"
+                                           Visibility="{Binding HasLookAlikes, Converter={StaticResource BoolToVisibility}}" />
                                 <!-- Groups are small, so the tiles inside a row aren't virtualized; big groups wrap. -->
                                 <ItemsControl ItemsSource="{Binding Photos}" ItemTemplate="{StaticResource PhotoTemplate}" Focusable="False">
                                     <ItemsControl.ItemsPanel>

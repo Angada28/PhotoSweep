@@ -17,16 +17,21 @@ public class PreselectionPolicyTests
         Assert.False(PreselectionPolicy.IsSuggested(Member(MatchKind.Keeper), level));
 
     [Theory]
-    [InlineData(MatchLevel.Exact, MatchKind.Identical)]
-    [InlineData(MatchLevel.SamePhoto, MatchKind.Identical)]
-    [InlineData(MatchLevel.SamePhoto, MatchKind.SamePhoto)]
-    public void Every_other_copy_is_suggested_at_Exact_and_SamePhoto(MatchLevel level, MatchKind kind) =>
-        Assert.True(PreselectionPolicy.IsSuggested(Member(kind), level));
+    [InlineData(MatchLevel.Exact)]
+    [InlineData(MatchLevel.SamePhoto)]
+    [InlineData(MatchLevel.Similar)]
+    public void Byte_identical_copies_are_suggested_at_every_level(MatchLevel level) =>
+        Assert.True(PreselectionPolicy.IsSuggested(Member(MatchKind.Identical), level));
 
+    // Even 0–2-bit look-alikes were only ~60% the same picture in a hand-labelled sample (docs/decisions.md).
     [Theory]
-    [InlineData(MatchKind.Identical, true)]
-    [InlineData(MatchKind.SamePhoto, false)]
-    [InlineData(MatchKind.Similar, false)]
-    public void At_Similar_only_byte_identical_copies_are_suggested(MatchKind kind, bool expected) =>
-        Assert.Equal(expected, PreselectionPolicy.IsSuggested(Member(kind), MatchLevel.Similar));
+    [InlineData(MatchLevel.SamePhoto, MatchKind.SamePhoto)]
+    [InlineData(MatchLevel.Similar, MatchKind.SamePhoto)]
+    [InlineData(MatchLevel.Similar, MatchKind.Similar)]
+    public void Look_alikes_are_never_suggested(MatchLevel level, MatchKind kind) =>
+        Assert.False(PreselectionPolicy.IsSuggested(Member(kind), level));
+
+    [Fact]
+    public void An_unknown_level_is_rejected() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => PreselectionPolicy.IsSuggested(Member(MatchKind.Identical), (MatchLevel)99));
 }

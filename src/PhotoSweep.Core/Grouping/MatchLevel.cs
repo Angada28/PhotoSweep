@@ -22,9 +22,11 @@ public enum MatchLevel
 /// </summary>
 public readonly record struct MatchThresholds(int PHashRadius, int DHashLimit)
 {
-    // PLACEHOLDERS, to be tuned from an evaluation set in a later phase. Current evidence (TestData variants):
-    // edits of the same photo land at 0–3 bits, unrelated photos at 24+ (random pairs average 32).
-    public static readonly MatchThresholds SamePhoto = new(PHashRadius: 8, DHashLimit: 8);
+    // Measured with tools/PhotoSweep.Eval (docs/decisions.md, 2026-09-26). SamePhoto 4/5: 99.3% of resized,
+    // recompressed, converted and rotated copies match, with no more false positives than 4/4. dHash gets the extra
+    // bit because it limits recall; pHash distances are always even (32 bits set above the median), so pHash 5 would
+    // behave exactly like 4. Similar stays at 14/14 until it gets its own measurement.
+    public static readonly MatchThresholds SamePhoto = new(PHashRadius: 4, DHashLimit: 5);
     public static readonly MatchThresholds Similar = new(PHashRadius: 14, DHashLimit: 14);
 
     /// <summary>Null for <see cref="MatchLevel.Exact"/>, which doesn't use perceptual hashes at all.</summary>

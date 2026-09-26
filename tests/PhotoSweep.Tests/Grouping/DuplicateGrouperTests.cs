@@ -60,12 +60,13 @@ public class DuplicateGrouperTests
         }
     }
 
-    // SamePhoto limits are 8/8. A match needs pHash AND dHash within their limits.
+    // SamePhoto limits are pHash ≤ 4, dHash ≤ 5. A match needs pHash AND dHash within their limits.
     [Theory]
-    [InlineData(8, 8, true)]
+    [InlineData(4, 5, true)]
     [InlineData(3, 3, true)]
-    [InlineData(9, 0, false)] // pHash too far, even though dHash is a perfect match
-    [InlineData(0, 9, false)] // dHash too far, even though pHash is a perfect match
+    [InlineData(6, 0, false)] // pHash too far, even though dHash is a perfect match
+    [InlineData(0, 6, false)] // dHash too far, even though pHash is a perfect match
+    [InlineData(5, 5, false)] // pHash has the tighter limit
     [InlineData(20, 20, false)]
     public void Both_hashes_must_agree(int pDistance, int dDistance, bool grouped)
     {
@@ -89,13 +90,13 @@ public class DuplicateGrouperTests
     [Fact]
     public void A_chain_is_split_around_the_keeper_and_leftovers_regroup()
     {
-        // Each file is 6 bits from the next (within SamePhoto's 8), so all four are connected; a–c is 12 bits.
+        // Each file is 3 bits from the next (within SamePhoto's 4/5), so all four are connected; a–c is 6 bits.
         ScannedFile[] files =
         [
             Photo("a.jpg", width: 2000, height: 1500), // highest resolution, so the first keeper
-            Photo("b.jpg", pHash: Bits(6), dHash: Bits(6)),
-            Photo("c.jpg", pHash: Bits(12), dHash: Bits(12)),
-            Photo("d.jpg", pHash: Bits(18), dHash: Bits(18)),
+            Photo("b.jpg", pHash: Bits(3), dHash: Bits(3)),
+            Photo("c.jpg", pHash: Bits(6), dHash: Bits(6)),
+            Photo("d.jpg", pHash: Bits(9), dHash: Bits(9)),
         ];
 
         var groups = DuplicateGrouper.Group(files, MatchLevel.SamePhoto);
@@ -110,8 +111,8 @@ public class DuplicateGrouperTests
         ScannedFile[] files =
         [
             Photo("a.jpg", width: 2000, height: 1500),
-            Photo("b.jpg", pHash: Bits(6), dHash: Bits(6)),
-            Photo("c.jpg", pHash: Bits(12), dHash: Bits(12)), // matches only b, which a already took
+            Photo("b.jpg", pHash: Bits(3), dHash: Bits(3)),
+            Photo("c.jpg", pHash: Bits(6), dHash: Bits(6)), // matches only b, which a already took
         ];
 
         var group = Assert.Single(DuplicateGrouper.Group(files, MatchLevel.SamePhoto));
@@ -119,17 +120,17 @@ public class DuplicateGrouperTests
         Assert.Equal(["a.jpg", "b.jpg"], Names(group));
     }
 
-    // A burst: frame k's hashes are 3k bits from frame 0, so each frame is 3 bits from the next and the ends are
-    // 27 bits apart. Union-find alone would make one 10-photo group of frames that don't all look alike.
+    // A burst: frame k's hashes are 2k bits from frame 0, so each frame is 2 bits from the next and the ends are
+    // 18 bits apart. Union-find alone would make one 10-photo group of frames that don't all look alike.
     private static ScannedFile[] Burst() =>
-        Enumerable.Range(0, 10).Select(k => Photo($"burst_{k:00}.jpg", pHash: Bits(3 * k), dHash: Bits(3 * k))).ToArray();
+        Enumerable.Range(0, 10).Select(k => Photo($"burst_{k:00}.jpg", pHash: Bits(2 * k), dHash: Bits(2 * k))).ToArray();
 
     [Fact]
     public void A_burst_whose_neighbours_match_but_ends_do_not_is_not_one_group()
     {
         var groups = DuplicateGrouper.Group(Burst(), MatchLevel.SamePhoto);
 
-        // All frames rank equally, so path order picks each keeper; each takes the frames within 8 bits of it.
+        // All frames rank equally, so path order picks each keeper; each takes the frames within 4 bits of it.
         Assert.Equal(
             [["burst_00.jpg", "burst_01.jpg", "burst_02.jpg"], ["burst_03.jpg", "burst_04.jpg", "burst_05.jpg"], ["burst_06.jpg", "burst_07.jpg", "burst_08.jpg"]],
             groups.Select(Names));
@@ -156,17 +157,17 @@ public class DuplicateGrouperTests
         ScannedFile[] files =
         [
             Photo("a.jpg", width: 2000, height: 1500),
-            Photo("b.jpg", pHash: Bits(6), dHash: Bits(6), sha: "B"),
+            Photo("b.jpg", pHash: Bits(3), dHash: Bits(3), sha: "B"),
             Undecodable("b copy.jpg", sha: "B"), // no fingerprint of its own; goes wherever its twin goes
-            Photo("c1.jpg", pHash: Bits(12), dHash: Bits(12), sha: "C"),
-            Photo("c2.jpg", pHash: Bits(12), dHash: Bits(12), sha: "C"),
+            Photo("c1.jpg", pHash: Bits(6), dHash: Bits(6), sha: "C"),
+            Photo("c2.jpg", pHash: Bits(6), dHash: Bits(6), sha: "C"),
         ];
 
         var groups = DuplicateGrouper.Group(files, MatchLevel.SamePhoto);
 
         Assert.Equal([["a.jpg", "b.jpg", "b copy.jpg"], ["c1.jpg", "c2.jpg"]], groups.Select(Names));
         var bCopy = groups[0].Members.Single(m => Path.GetFileName(m.File.Path) == "b copy.jpg");
-        Assert.Equal((MatchKind.SamePhoto, 6, 6), (bCopy.Kind, bCopy.PHashDistance, bCopy.DHashDistance));
+        Assert.Equal((MatchKind.SamePhoto, 3, 3), (bCopy.Kind, bCopy.PHashDistance, bCopy.DHashDistance));
     }
 
     [Fact]
@@ -222,8 +223,11 @@ public class DuplicateGrouperTests
     }
 
     [Fact]
-    public void Placeholder_thresholds_keep_levels_nested()
+    public void Thresholds_are_the_measured_values_and_keep_levels_nested()
     {
+        // Measured with tools/PhotoSweep.Eval; change them only together with docs/decisions.md.
+        Assert.Equal(new MatchThresholds(4, 5), MatchThresholds.SamePhoto);
+        Assert.Equal(new MatchThresholds(14, 14), MatchThresholds.Similar);
         Assert.Null(MatchThresholds.For(MatchLevel.Exact));
         Assert.True(MatchThresholds.SamePhoto.PHashRadius <= MatchThresholds.Similar.PHashRadius);
         Assert.True(MatchThresholds.SamePhoto.DHashLimit <= MatchThresholds.Similar.DHashLimit);

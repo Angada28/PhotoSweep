@@ -69,8 +69,14 @@ public sealed partial class GroupViewModel
 
     public long SelectedBytes { get; private set; }
 
-    /// <summary>False when the policy suggests nothing here, e.g. a group of look-alikes at Similar.</summary>
+    /// <summary>Shown on groups with look-alikes, which <see cref="PreselectionPolicy"/> never selects.</summary>
+    public const string LookAlikeNote = "Look-alikes aren't selected automatically. Compare them and choose.";
+
+    /// <summary>False when the policy suggests nothing here, e.g. a group with no byte-identical copies.</summary>
     public bool HasSuggestions => _suggested.Count > 0;
+
+    /// <summary>True when any member matched by appearance rather than bytes, so the row shows <see cref="LookAlikeNote"/>.</summary>
+    public bool HasLookAlikes => Group.Members.Any(m => m.Kind is MatchKind.SamePhoto or MatchKind.Similar);
 
     /// <summary>True while at least two photos are unselected, so one more can be selected and one still stays.</summary>
     internal bool CanSelectAnother => Photos.Count - SelectedCount >= 2;

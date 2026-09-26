@@ -201,7 +201,7 @@ public static class ReviewPage
           const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
           const a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
-          a.download = `labels-seed${data.seed}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.json`;
+          a.download = `labels-seed${data.seed}-${new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '')}.json`;
           document.body.appendChild(a); a.click(); a.remove();
           setTimeout(() => URL.revokeObjectURL(a.href), 1000);
           const open = data.pairs.filter(p => !p.verdict).length;

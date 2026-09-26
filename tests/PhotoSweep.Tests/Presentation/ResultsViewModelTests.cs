@@ -146,25 +146,24 @@ public class ResultsViewModelTests
 
     // ---- Pre-selection ----
 
-    [Theory]
-    [InlineData(MatchLevel.Exact)]
-    [InlineData(MatchLevel.SamePhoto)]
-    public void Every_copy_except_the_keeper_is_preselected_at_Exact_and_SamePhoto(MatchLevel level)
+    [Fact]
+    public void Every_byte_identical_copy_is_preselected()
     {
-        var results = Results(level, [Mixed("x", MatchKind.Keeper, MatchKind.Identical, MatchKind.SamePhoto), .. TwoGroups]);
+        var results = Results(MatchLevel.Exact, TwoGroups);
 
         Assert.All(AllPhotos(results), p => Assert.Equal(!p.IsKeeper, p.IsSelected));
-        Assert.Equal(5, results.SelectedCount);
-        Assert.Equal("5 photos selected · 6 MB", results.SelectionText);
+        Assert.Equal("3 photos selected · 4 MB", results.SelectionText);
     }
 
-    [Fact]
-    public void At_Similar_only_byte_identical_copies_are_preselected()
+    [Theory]
+    [InlineData(MatchLevel.SamePhoto)]
+    [InlineData(MatchLevel.Similar)]
+    public void Only_byte_identical_copies_are_preselected_never_look_alikes(MatchLevel level)
     {
-        var results = Results(MatchLevel.Similar,
+        var results = Results(level,
         [
             Mixed("x", MatchKind.Keeper, MatchKind.Identical, MatchKind.SamePhoto, MatchKind.Similar),
-            Mixed("y", MatchKind.Keeper, MatchKind.Similar),
+            Mixed("y", MatchKind.Keeper, MatchKind.SamePhoto),
         ]);
 
         var selected = AllPhotos(results).Where(p => p.IsSelected).ToList();
@@ -174,13 +173,46 @@ public class ResultsViewModelTests
     }
 
     [Fact]
+    public void Select_all_suggested_selects_identical_copies_and_leaves_look_alikes_alone()
+    {
+        var results = Results(MatchLevel.SamePhoto,
+        [
+            Mixed("x", MatchKind.Keeper, MatchKind.Identical, MatchKind.SamePhoto),
+            Mixed("y", MatchKind.Keeper, MatchKind.SamePhoto),
+        ]);
+        var lookAlike = AllPhotos(results).First(p => p.Member.Kind == MatchKind.SamePhoto);
+        lookAlike.ToggleCommand.Execute(null); // the user picks a look-alike by hand...
+        results.ClearSelectionCommand.Execute(null);
+
+        results.SelectSuggestedCommand.Execute(null); // ...and "Select all suggested" doesn't bring it back
+
+        Assert.Equal([MatchKind.Identical], AllPhotos(results).Where(p => p.IsSelected).Select(p => p.Member.Kind));
+    }
+
+    [Fact]
     public void Select_suggested_is_off_when_the_policy_suggests_nothing()
     {
-        var results = Results(MatchLevel.Similar, [Mixed("y", MatchKind.Keeper, MatchKind.Similar, MatchKind.SamePhoto)]);
+        var results = Results(MatchLevel.SamePhoto, [Mixed("y", MatchKind.Keeper, MatchKind.Similar, MatchKind.SamePhoto)]);
 
         Assert.Equal(0, results.SelectedCount);
         Assert.False(results.SelectSuggestedCommand.CanExecute(null));
         Assert.False(results.ClearSelectionCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void Groups_with_look_alikes_carry_the_note_and_identical_only_groups_do_not()
+    {
+        var results = Results(MatchLevel.SamePhoto,
+        [
+            Mixed("same", MatchKind.Keeper, MatchKind.SamePhoto),
+            Mixed("similar", MatchKind.Keeper, MatchKind.Similar),
+            Mixed("mixed", MatchKind.Keeper, MatchKind.Identical, MatchKind.SamePhoto),
+            Mixed("exact", MatchKind.Keeper, MatchKind.Identical),
+        ]);
+
+        var byName = results.Groups.ToDictionary(g => g.Photos[0].FileName, g => g.HasLookAlikes);
+        Assert.Equal(new Dictionary<string, bool> { ["same0.jpg"] = true, ["similar0.jpg"] = true, ["mixed0.jpg"] = true, ["exact0.jpg"] = false }, byName);
+        Assert.Equal("Look-alikes aren't selected automatically. Compare them and choose.", GroupViewModel.LookAlikeNote);
     }
 
     // ---- Toggling and the keep-one rule ----

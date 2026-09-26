@@ -3,6 +3,80 @@
 Decisions that were measured or argued rather than obvious, newest first. Each records what was chosen, the
 evidence, and what would make us revisit it.
 
+## 2026-09-26: SamePhoto becomes pHash ≤ 4, dHash ≤ 5; only byte-identical copies are pre-selected
+
+**Decisions.**
+1. `MatchThresholds.SamePhoto` goes from 8/8 to **pHash ≤ 4, dHash ≤ 5**. Similar stays at 14/14 until it's measured on its own.
+2. `PreselectionPolicy` ticks **only byte-identical copies, at every level**. Look-alike members (SamePhoto and Similar)
+   are never pre-selected, and "Select all suggested" selects identical copies only.
+3. Groups with look-alikes show one line on the results page: "Look-alikes aren't selected automatically. Compare
+   them and choose." (`GroupViewModel.LookAlikeNote`, shown when `HasLookAlikes`).
+
+**How it was measured.** `tools/PhotoSweep.Eval` (see its README) on `sweep-test`, the Google Takeout export of the
+earlier hand review (8,998 decodable photos). This library had its duplicates removed before export, so it holds
+almost no true re-saves and many near-misses (bursts, app screenshots). **For precision it is a worst case**: a normal
+library with real copies would score higher. Recall doesn't depend on that, because it's measured on generated copies.
+
+**1. Recall and false positives (synthetic).** 300 photos (seed 20260926), each saved as 7 variants: resized 50% and
+25%, JPEG q50 and q30, PNG, EXIF orientation 6, 50% + q30. 2,100 variants; 44,850 pairs of different originals.
+Recall (% of variants matched to their original) / false positives:
+
+| pHash ≤ \ dHash ≤ | 3 | 4 | 5 | 6 | 8 | 10 | 14 |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| **2** | 94.5 / 0 | 96.4 / 1 | 97.9 / 1 | 98.1 / 1 | 98.1 / 1 | 98.2 / 1 | 98.2 / 1 |
+| **4** | 95.9 / 0 | 97.8 / 1 | **99.3 / 1** | 99.6 / 1 | 99.7 / 2 | 99.8 / 3 | 99.8 / 3 |
+| **6** | 95.9 / 0 | 97.8 / 1 | 99.3 / 1 | 99.6 / 1 | 99.9 / 2 | 100 / 3 | 100 / 3 |
+| **8** | 95.9 / 0 | 97.8 / 1 | 99.3 / 2 | 99.6 / 2 | 99.9 / 3 | 100 / 4 | 100 / 4 |
+| **14** | 95.9 / 0 | 97.8 / 2 | 99.3 / 3 | 99.6 / 4 | 99.9 / 7 | 100 / 8 | 100 / 11 |
+
+- **dHash limits recall, not pHash.** Beyond pHash 4 the rows are nearly identical; the dHash column decides. dHash
+  4 → 5 lifts recall from 97.8% to 99.3% with no extra false positive, hence 4/5 rather than 4/4 or 5/5.
+- **pHash distances are even.** pHash sets exactly the 32 bits above the median of its 64 coefficients (barring ties), and two
+  hashes with 32 bits set differ in an even number of bits (all 120 labelled real pairs were even too). An odd pHash
+  limit behaves like the even one below it, so pHash 5 would add nothing over 4.
+- **None of the "false positives" are unrelated photos colliding.** All 11 pairs within 14/14 are near-duplicates
+  already in the library: burst frames (one pair only 0/4 apart, with people visibly moving), Pokémon GO screenshots, a
+  burst cover, two shots 6 s apart. The next-closest different originals are about 24/23 bits apart (5th percentile).
+  So the thresholds can't be what keeps bursts and screenshots out, which is what the next measurement showed.
+
+**2. Precision on real groups.** Grouped at 8/8 (540 groups), then 30 keeper–member pairs drawn from each distance
+bucket (max of pHash and dHash) and labelled by eye, same rule as before: "same" only if there is no visible
+difference at all. Byte-identical copies are excluded. Overall precision is weighted by each bucket's share of all
+pairs in the grouping; 95% Wilson intervals (the weighted one uses the Kish effective sample size).
+
+| Bucket | Pairs in grouping | Labelled | Same | Different | Precision | 95% CI |
+|---|---:|---:|---:|---:|---:|---|
+| 0–2 | 161 | 30 | 18 | 12 | 60.0% | 42.3–75.4% |
+| 3–4 | 189 | 30 | 7 | 23 | 23.3% | 11.8–40.9% |
+| 5–6 | 251 | 30 | 12 | 18 | 40.0% | 24.6–57.7% |
+| 7–8 | 309 | 30 | 2 | 28 | 6.7% | 1.8–21.3% |
+
+| Threshold (pHash ≤ T and dHash ≤ T) | Pairs in grouping | Labelled | Weighted precision | 95% CI | Effective n |
+|---|---:|---:|---:|---|---:|
+| ≤ 2 | 161 | 30 | 60.0% | 42.3–75.4% | 30.0 |
+| ≤ 4 | 350 | 60 | 40.2% | 28.7–52.9% | 59.6 |
+| ≤ 6 | 601 | 90 | 40.1% | 30.4–50.6% | 86.9 |
+| ≤ 8 | 910 | 120 | 28.8% | 21.2–37.7% | 112.9 |
+
+The 4/5 limit adds the pairs at pHash ≤ 4, dHash = 5 on top of ≤ 4: 9 of the labelled 5–6 pairs, 2 of them "same".
+At 4/5 this library has 327 SamePhoto groups (was 540 at 8/8).
+
+**Why pre-select only identical copies.** Tightening the limits removes the worst buckets (7–8 is 93% different), but
+precision never gets high enough to act on the user's behalf. Even pairs 0–2 bits apart were only 60% the same picture
+(42–75%). What differs is what a 64-bit hash of a 32×32 thumbnail can't see: clock digits and notifications on
+screenshots, stickers and small edits, burst frames a moment apart. Ticking those for removal would put 4 in 10
+wrong suggestions in front of the user. Byte-identical copies are the only case where removing one can't lose anything,
+so they are the only ones ticked. SamePhoto still *groups* look-alikes, since grouping costs nothing; the user decides,
+helped by the compare window. This supersedes the 2026-09-25 pre-selection entry below (which ticked every SamePhoto
+member).
+
+**Why still tighten SamePhoto.** The grouping now says less that's wrong: 4/5 keeps 99.3% of real re-saves while
+dropping the 7–8 bucket (the largest and least precise) into Similar, where it belongs under the definitions.
+
+**Revisit if** a second library (e.g. the 17k OneDrive one, which has real copies) shows much higher precision at 0–2
+bits, which would make a distance-based pre-selection worth reconsidering; or once screenshot handling and burst
+detection (EXIF time, `_BURST` names) exist, since those were most of the "different" pairs.
+
 ## 2026-09-25: Compare window: the ranker decides "better", the page's own view-models, previews through an interface
 
 **"Better" comes from `KeeperRanker.Compare`, not from rules in the window.** Each detail row is marked only when its
@@ -88,6 +162,8 @@ Scrolling a page at a time (2 pages/s) still decoded every thumbnail and skipped
 slow to appear on very fast machines, where the delay becomes most of the wait.
 
 ## 2026-09-25: Pre-selection lives in one policy; at Similar only byte-identical copies are pre-selected
+
+*Superseded 2026-09-26: only byte-identical copies are pre-selected, at every level (see above). The single policy stays.*
 
 `Core/Cleanup/PreselectionPolicy.IsSuggested(member, level)` is the only place that decides what starts out ticked:
 every non-keeper at Exact and SamePhoto, and at Similar only members byte-identical to the keeper (a Similar group can
@@ -204,7 +280,7 @@ The library has no byte-identical copies, so every group was a look-alike match.
 **Where the line falls.** Every wrong group had pHash ≥ 5 or dHash ≥ 5. True re-saves (a photo vs a screenshot of
 it, Snapchat and WhatsApp re-saves) were at 0–1 bits.
 
-**Candidates for tuning (no code changes yet; tuning comes after the UI).**
+**Candidates for tuning (no code changes yet; tuning comes after the UI).** *Resolved 2026-09-26: SamePhoto is 4/5 and look-alikes are never pre-selected (see the entry at the top).*
 - SamePhoto = pHash ≤ 4 **and** dHash ≤ 4. On this sample it keeps 14 of the 20 correct groups and none of the 14
   wrong ones. The 6 correct groups it loses are burst frames with no visible change; under the definitions above,
   burst frames belong in Similar anyway.
