@@ -16,7 +16,7 @@ namespace PhotoSweep.Desktop.Services;
 /// hundreds of decodes that fight over the disk and the CPU. A request waits for a slot with its row's token, so a
 /// row scrolled away before its turn is skipped without being decoded, and one scrolled away mid-decode stops it.</item>
 /// <item><b>Cache:</b> least-recently-used with a byte budget rather than an entry count, because thumbnails differ in
-/// size (a portrait at 2× DPI is much bigger than one at 1×). Keyed by path, last-write time and pixel size.</item>
+/// size (a portrait at 2× DPI is much bigger than one at 1×). Keyed by path, last-write time and the box it fits.</item>
 /// <item><b>Threads:</b> ImageSharp decodes on the thread pool; the <see cref="BitmapSource"/> is created and frozen
 /// there too. Frozen WPF objects are read-only, so the UI thread may use them even though another thread made them.</item>
 /// </list>
@@ -37,14 +37,21 @@ public sealed class ThumbnailCache(long budgetBytes, int maxConcurrentDecodes)
     private readonly LinkedList<Entry> _recent = []; // most recently used first
     private long _bytes;
 
+    /// <summary>A square thumbnail; see the other overload.</summary>
+    public Task<(BitmapSource? Image, ThumbnailStatus Status)> GetAsync(string path, DateTime lastWriteUtc, int pixelSize, CancellationToken ct) =>
+        GetAsync(path, lastWriteUtc, pixelSize, pixelSize, keep: true, ct);
+
     /// <summary>
-    /// The thumbnail, or a status saying why there isn't one. Throws <see cref="OperationCanceledException"/> if
-    /// <paramref name="ct"/> is cancelled before the thumbnail is ready.
+    /// The picture fitted into <paramref name="pixelWidth"/>×<paramref name="pixelHeight"/>, or a status saying why
+    /// there isn't one. Throws <see cref="OperationCanceledException"/> if <paramref name="ct"/> is cancelled before
+    /// it's ready. With <paramref name="keep"/> false it's decoded through the same throttle but not cached (for
+    /// actual-size photos, one of which could fill the whole budget).
     /// </summary>
-    public async Task<(BitmapSource? Image, ThumbnailStatus Status)> GetAsync(string path, DateTime lastWriteUtc, int pixelSize, CancellationToken ct)
+    public async Task<(BitmapSource? Image, ThumbnailStatus Status)> GetAsync(
+        string path, DateTime lastWriteUtc, int pixelWidth, int pixelHeight, bool keep, CancellationToken ct)
     {
         ThumbnailStats.Requested();
-        var key = new Key(path, lastWriteUtc, pixelSize);
+        var key = new Key(path, lastWriteUtc, pixelWidth, pixelHeight);
         if (TryGet(key) is { } hit)
         {
             ThumbnailStats.CacheHit();
@@ -83,7 +90,7 @@ public sealed class ThumbnailCache(long budgetBytes, int maxConcurrentDecodes)
 
             ThumbnailStats.Decoded();
             // Online-only and missing aren't cached: that can change at any moment, so it's checked every time.
-            if (entry.Status is ThumbnailStatus.Ok or ThumbnailStatus.CannotDecode)
+            if (keep && (entry.Status is ThumbnailStatus.Ok or ThumbnailStatus.CannotDecode))
                 Add(entry);
             return (entry.Image, entry.Status);
         }
@@ -95,7 +102,7 @@ public sealed class ThumbnailCache(long budgetBytes, int maxConcurrentDecodes)
 
     private static async Task<Entry> DecodeAsync(Key key, CancellationToken ct)
     {
-        var result = await Thumbnail.LoadAsync(key.Path, key.PixelSize, ct);
+        var result = await Thumbnail.LoadAsync(key.Path, key.Width, key.Height, ct);
         if (result.Status != ThumbnailStatus.Ok)
             return new Entry(key, null, result.Status, Bytes: 256); // a small nominal cost, so failures are evicted too
 
@@ -135,7 +142,7 @@ public sealed class ThumbnailCache(long budgetBytes, int maxConcurrentDecodes)
         }
     }
 
-    private readonly record struct Key(string Path, DateTime LastWriteUtc, int PixelSize);
+    private readonly record struct Key(string Path, DateTime LastWriteUtc, int Width, int Height);
 
     private sealed record Entry(Key Key, BitmapSource? Image, ThumbnailStatus Status, long Bytes);
 }

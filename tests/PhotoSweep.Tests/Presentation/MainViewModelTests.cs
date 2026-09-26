@@ -12,7 +12,8 @@ public class MainViewModelTests
     private readonly FakeCleanupService _cleanup = new();
 
     private MainViewModel Create() =>
-        new(_picker, new FakeKnownFolders(), _service, _cleanup, new FakeShellService(), new FakeFileAvailability(), new ManualTimeProvider());
+        new(_picker, new FakeKnownFolders(), _service, _cleanup, new FakeShellService(), new FakeFileAvailability(),
+            new FakeWindowService(), new FakePreviewLoader(), new ManualTimeProvider());
 
     [Fact]
     public void Starts_on_the_start_page()

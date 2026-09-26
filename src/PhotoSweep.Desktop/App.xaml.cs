@@ -27,7 +27,9 @@ public partial class App : Application
             new ScanService(ScanCache.DefaultPath),
             new CleanupService(),
             new ExplorerShellService(),
-            new DiskFileAvailability());
+            new DiskFileAvailability(),
+            new WpfWindowService(),
+            new WpfPreviewLoader());
         var window = new MainWindow { DataContext = _main };
         window.Closing += OnMainWindowClosing;
         window.Show();

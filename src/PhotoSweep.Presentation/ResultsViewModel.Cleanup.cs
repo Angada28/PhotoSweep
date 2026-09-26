@@ -195,6 +195,7 @@ public sealed partial class ResultsViewModel
     {
         IsConfirmingLeave = false;
         _regrouping?.Cancel();
+        _compare?.Close(); // it shows this page's groups, which are about to go
         _goBack();
     }
 

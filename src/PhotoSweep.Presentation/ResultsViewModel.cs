@@ -20,6 +20,8 @@ public sealed partial class ResultsViewModel : ObservableObject
     private readonly ICleanupService _cleanup;
     private readonly IShellService _shell;
     private readonly IFileAvailability _availability;
+    private readonly IWindowService _windows;
+    private readonly IPreviewLoader _previews;
     private readonly Action _goBack;
     private readonly TimeZoneInfo _localZone;
 
@@ -29,6 +31,7 @@ public sealed partial class ResultsViewModel : ObservableObject
     private StrictnessOption _selectedStrictness;
     private CancellationTokenSource? _regrouping;
     private bool _bulkChange;
+    private CompareViewModel? _compare;
 
     public ResultsViewModel(
         ScanOutcome outcome,
@@ -36,6 +39,8 @@ public sealed partial class ResultsViewModel : ObservableObject
         ICleanupService cleanup,
         IShellService shell,
         IFileAvailability availability,
+        IWindowService windows,
+        IPreviewLoader previews,
         Action goBack,
         TimeProvider? time = null)
     {
@@ -44,6 +49,8 @@ public sealed partial class ResultsViewModel : ObservableObject
         _cleanup = cleanup;
         _shell = shell;
         _availability = availability;
+        _windows = windows;
+        _previews = previews;
         _goBack = goBack;
         _localZone = (time ?? TimeProvider.System).LocalTimeZone;
         _groupsByLevel[outcome.Request.Level] = outcome.Groups;
@@ -200,7 +207,7 @@ public sealed partial class ResultsViewModel : ObservableObject
     {
         _bulkChange = true;
         var rows = RemainingGroups.Apply(_groupsByLevel[level], _movedOut, _renamed)
-            .Select(g => new GroupViewModel(g.Group, level, g.KeeperMoved, selection, _availability, _localZone, OnSelectionChanged))
+            .Select(g => new GroupViewModel(g.Group, level, g.KeeperMoved, selection, _availability, _localZone, OnSelectionChanged, OpenCompare))
             .OrderByDescending(g => g.FreeableBytes)
             .ThenBy(g => g.Group.Keeper.File.Path, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -209,6 +216,20 @@ public sealed partial class ResultsViewModel : ObservableObject
         Level = level;
         Groups = rows;
         RecountSelection();
+    }
+
+    /// <summary>
+    /// Opens the compare window on <paramref name="photo"/> (null: the group's first photo after the keeper). There's
+    /// one compare window: opening again re-points it instead of stacking windows. Only navigates; never selects.
+    /// </summary>
+    private void OpenCompare(GroupViewModel group, PhotoViewModel? photo)
+    {
+        if (_compare is { IsClosed: false } open)
+            open.Open(group, photo);
+        else
+            _compare = new CompareViewModel(this, group, photo, _availability, _previews, _shell, _localZone);
+
+        _windows.ShowCompare(_compare);
     }
 
     /// <summary>A bulk change adds up the totals once at the end instead of raising a change per photo.</summary>

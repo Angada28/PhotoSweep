@@ -29,6 +29,34 @@ public class ThumbnailTests
     }
 
     [Fact]
+    public async Task Fits_a_wide_box_by_its_height()
+    {
+        var result = await Thumbnail.LoadAsync(TestPhoto("chelsea.jpg"), 200, 50); // 256×170
+
+        Assert.Equal(50, result.Height);
+        Assert.InRange(result.Width, 74, 76);
+    }
+
+    [Fact]
+    public async Task Fits_a_box_the_same_way_for_a_photo_stored_sideways()
+    {
+        // chelsea_exif6 is stored 170×256 and turned upright by its EXIF tag; the box applies to the upright picture.
+        var upright = await Thumbnail.LoadAsync(TestPhoto("chelsea.jpg"), 128, 60);
+        var tagged = await Thumbnail.LoadAsync(TestPhoto("chelsea_exif6.jpg"), 128, 60);
+
+        Assert.Equal((upright.Width, upright.Height), (tagged.Width, tagged.Height));
+        Assert.Equal(60, tagged.Height);
+    }
+
+    [Fact]
+    public async Task An_unlimited_box_gives_the_actual_size()
+    {
+        var result = await Thumbnail.LoadAsync(TestPhoto("chelsea_exif6.jpg"), int.MaxValue, int.MaxValue);
+
+        Assert.Equal((256, 170), (result.Width, result.Height));
+    }
+
+    [Fact]
     public async Task Applies_the_EXIF_orientation()
     {
         // Stored sideways (170×256) with Orientation = 6; displayed as the same landscape picture as chelsea.jpg.
@@ -53,9 +81,11 @@ public class ThumbnailTests
             using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
             {
                 var result = await Thumbnail.LoadAsync(path, 64);
+                var actualSize = await Thumbnail.LoadAsync(path, int.MaxValue, int.MaxValue); // the compare window's 1:1
 
                 Assert.Equal(ThumbnailStatus.OnlineOnly, result.Status);
                 Assert.Null(result.Bgra);
+                Assert.Equal(ThumbnailStatus.OnlineOnly, actualSize.Status);
             }
         }
         finally

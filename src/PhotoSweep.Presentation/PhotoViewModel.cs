@@ -65,6 +65,9 @@ public sealed partial class PhotoViewModel : ObservableObject
 
     public GroupMember Member { get; }
 
+    /// <summary>The row this photo is on. Its selection rules apply here and in the compare window alike.</summary>
+    internal GroupViewModel Group => _group;
+
     public ScannedFile File => Member.File;
 
     public bool IsKeeper => Member.Kind == MatchKind.Keeper;
@@ -142,6 +145,10 @@ public sealed partial class PhotoViewModel : ObservableObject
 
     [RelayCommand(CanExecute = nameof(CanToggle))]
     private void Toggle() => _group.Toggle(this);
+
+    /// <summary>Opens the compare window on this photo. Never changes the selection.</summary>
+    [RelayCommand]
+    private void Compare() => _group.Compare(this);
 
     internal void NotifyCanToggleChanged()
     {

@@ -40,7 +40,7 @@ public class ResultsCleanupTests
         var request = new ScanRequest(new ScanOptions { Folders = folders ?? [@"C:\Photos"] }, MatchLevel.SamePhoto);
         var scan = new ScanResult(groups.SelectMany(g => g.Members).Select(m => m.File), cacheHits: 0);
         return new ResultsViewModel(new ScanOutcome(request, scan, groups, []), _scan, _cleanup, _shell, _availability,
-            () => _backs++, new FixedTime(DateTimeOffset.UnixEpoch));
+            new FakeWindowService(), new FakePreviewLoader(), () => _backs++, new FixedTime(DateTimeOffset.UnixEpoch));
     }
 
     private static PhotoViewModel PhotoAt(ResultsViewModel results, string path) =>

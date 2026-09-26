@@ -1,6 +1,7 @@
 using PhotoSweep.Core.Scanning;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats;
+using SixLabors.ImageSharp.Metadata.Profiles.Exif;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 
@@ -34,14 +35,25 @@ public static class Thumbnail
     /// with the EXIF orientation applied. Never enlarges. Never throws for a bad file; only for cancellation, which
     /// ImageSharp also checks part-way through decoding, so a thumbnail nobody wants any more stops early.
     /// </summary>
+    public static Task<ThumbnailResult> LoadAsync(string path, int maxSize, CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxSize, 1);
+        return LoadAsync(path, maxSize, maxSize, ct);
+    }
+
+    /// <summary>
+    /// Like the square overload, but fits a <paramref name="maxWidth"/>×<paramref name="maxHeight"/> box, e.g. a pane
+    /// of the compare window. <see cref="int.MaxValue"/> for both decodes the photo at its actual size.
+    /// </summary>
     /// <remarks>
     /// The online-only check is repeated here, right before the file is opened, even though the UI checks when a row
     /// is shown: thumbnails wait in a queue, and OneDrive can free up a file in between. This is the last line of
     /// defence, so it sits where the file is actually opened.
     /// </remarks>
-    public static async Task<ThumbnailResult> LoadAsync(string path, int maxSize, CancellationToken ct = default)
+    public static async Task<ThumbnailResult> LoadAsync(string path, int maxWidth, int maxHeight, CancellationToken ct = default)
     {
-        ArgumentOutOfRangeException.ThrowIfLessThan(maxSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxWidth, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxHeight, 1);
         ct.ThrowIfCancellationRequested();
 
         switch (CloudFileAttributes.Check(path))
@@ -58,17 +70,19 @@ public static class Thumbnail
             // TargetSize lets the JPEG decoder scale down while decoding (it skips most of the work for an 8× smaller
             // image), so a 12 MP photo never exists at full size in memory. Other formats decode, then shrink.
             // But TargetSize also scales UP, so it's only set for images bigger than the box; the header read is cheap.
+            // The decoder works on the image as stored, so a box for a sideways-stored photo is turned to match.
             var stored = await Image.IdentifyAsync(stream, ct);
             stream.Position = 0;
-            var options = stored.Width > maxSize || stored.Height > maxSize
-                ? new DecoderOptions { TargetSize = new Size(maxSize, maxSize) }
+            var (boxWidth, boxHeight) = IsTurned(stored) ? (maxHeight, maxWidth) : (maxWidth, maxHeight);
+            var options = stored.Width > boxWidth || stored.Height > boxHeight
+                ? new DecoderOptions { TargetSize = new Size(boxWidth, boxHeight) }
                 : new DecoderOptions();
             using var image = await Image.LoadAsync<Bgra32>(options, stream, ct);
             image.Mutate(x =>
             {
                 x.AutoOrient(); // WPF ignores EXIF orientation, so the pixels are turned upright here
-                if (image.Width > maxSize || image.Height > maxSize)
-                    x.Resize(new ResizeOptions { Mode = ResizeMode.Max, Size = new Size(maxSize, maxSize) });
+                if (image.Width > maxWidth || image.Height > maxHeight)
+                    x.Resize(new ResizeOptions { Mode = ResizeMode.Max, Size = new Size(maxWidth, maxHeight) });
             });
 
             var pixels = new byte[image.Width * image.Height * 4];
@@ -88,4 +102,8 @@ public static class Thumbnail
             return new ThumbnailResult(ThumbnailStatus.Unavailable);
         }
     }
+
+    // Orientations 5–8 turn the picture by 90°, so the displayed width is the stored height.
+    private static bool IsTurned(ImageInfo info) =>
+        info.Metadata.ExifProfile is { } exif && exif.TryGetValue(ExifTag.Orientation, out var o) && o.Value is >= 5 and <= 8;
 }

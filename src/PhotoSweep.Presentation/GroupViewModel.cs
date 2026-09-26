@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.Input;
 using PhotoSweep.Core.Cleanup;
 using PhotoSweep.Core.Grouping;
 using PhotoSweep.Presentation.Services;
@@ -13,9 +14,10 @@ namespace PhotoSweep.Presentation;
 /// Each change is reported to the page as a delta (±1 photo, ±bytes), so the totals update in constant time
 /// instead of re-adding thousands of groups on every click.
 /// </remarks>
-public sealed class GroupViewModel
+public sealed partial class GroupViewModel
 {
     private readonly Action<int, long> _selectionChanged;
+    private readonly Action<GroupViewModel, PhotoViewModel?> _compare;
     private readonly HashSet<PhotoViewModel> _suggested;
 
     /// <param name="suggestNothing">True when the scan's keeper was moved: the others' match kinds describe the old keeper, so none is suggested.</param>
@@ -27,10 +29,12 @@ public sealed class GroupViewModel
         IReadOnlySet<string>? selection,
         IFileAvailability availability,
         TimeZoneInfo localZone,
-        Action<int, long> selectionChanged)
+        Action<int, long> selectionChanged,
+        Action<GroupViewModel, PhotoViewModel?> compare)
     {
         Group = group;
         _selectionChanged = selectionChanged;
+        _compare = compare;
         Photos = group.Members.Select(m => new PhotoViewModel(m, this, availability, localZone)).ToList();
         _suggested = suggestNothing ? [] : Photos.Where(p => PreselectionPolicy.IsSuggested(p.Member, level)).ToHashSet();
         FreeableBytes = group.Members.Skip(1).Sum(m => m.File.SizeBytes);
@@ -70,6 +74,13 @@ public sealed class GroupViewModel
 
     /// <summary>True while at least two photos are unselected, so one more can be selected and one still stays.</summary>
     internal bool CanSelectAnother => Photos.Count - SelectedCount >= 2;
+
+    /// <summary>Opens the compare window on this group, with the first photo after the keeper on the right.</summary>
+    [RelayCommand]
+    private void Compare() => _compare(this, null);
+
+    /// <summary>Opens the compare window with <paramref name="photo"/> on the right (or the first other photo, for the keeper).</summary>
+    internal void Compare(PhotoViewModel photo) => _compare(this, photo);
 
     internal void Toggle(PhotoViewModel photo)
     {

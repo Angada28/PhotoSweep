@@ -3,6 +3,36 @@
 Decisions that were measured or argued rather than obvious, newest first. Each records what was chosen, the
 evidence, and what would make us revisit it.
 
+## 2026-09-25: Compare window: the ranker decides "better", the page's own view-models, previews through an interface
+
+**"Better" comes from `KeeperRanker.Compare`, not from rules in the window.** Each detail row is marked only when its
+own ranking criterion separates the two photos (resolution tier, camera data, copy-like name, size within one format,
+older copy), and the verdict is the ranker's reason. So the window can't praise the photo the ranking put second.
+Comparing correctly needs the same context the ranking used: the grouper ranks each group against the whole connected
+set, and "within 1% of the largest" depends on it. `PhotoGroup.RankContext` carries that set (`RemainingGroups` keeps
+it after moves). A test checks `Compare` against `Rank` for every pair. *Known gap:* a photo that undo put back under a
+new name ("a (2).jpg") is compared under that name, while the group's order came from the scan-time name. The verdict
+is then right about the files as they are now, and can differ from the order.
+
+**The same objects as the results page, not copies.** The panes hold the page's `PhotoViewModel`s, and selecting goes
+through their `ToggleCommand`, so the keep-one rule, the totals and closing the confirmation all behave exactly as a
+click on the tile. Nothing needs syncing. The cost is that the page rebuilds its rows after every move, undo and
+re-group. The window then finds its place again by path: the same photo, or failing that its group, or failing that the
+group now at the same position, and closes when nothing is left.
+
+**Previews through `IPreviewLoader`, returning `object`.** Presentation can't name WPF's `ImageSource`, and the
+interesting logic (don't open online-only files, cancel when moving on, drop late results, prefetch neighbours, don't
+reload when the pane grows 10% or the preview is already the whole photo) belongs in the view-model where it's tested.
+Only decoding and caching are in Desktop. Actual-size decodes aren't cached or prefetched, because one 48 MP photo is
+about 190 MB.
+
+**Pan is shared as a fraction (0–1) of each picture**, not in pixels, so two photos of different resolutions still show
+the same spot. Zoom 1 means one image pixel per screen pixel (the behaviour divides out Windows display scaling).
+
+**Opening it never changes the selection.** A tile click selects, so double-click was rejected (it would toggle twice).
+Instead: a Compare button on the tile (shown on hover and keyboard focus), right-click > Compare, and Enter on a
+focused tile. There's also a Compare button on each group row.
+
 ## 2026-09-25: The results page works out what to show from the scan; undo is a stack that lasts as long as the page
 
 **Worked out, not edited in place.** After a move the page doesn't delete rows. It keeps the scan paths moved to the
@@ -201,3 +231,8 @@ moves only the photo, so its sidecar stays behind in the library. Decide whether
 - **Restore earlier clean-ups (`FindBatches`).** Undo only covers batches moved on the current results page. A
   "Review folder" page could list every batch still in `_PhotoSweep Removed` (via `ReviewFolder.FindBatches`) and undo
   any of them.
+- **Remember the compare window's size and position.** It opens at 1200×840, centred on the main window, every time.
+  Saving the bounds (and maximised state) to a small settings file, and checking they're still on a connected screen
+  before using them, would let it reopen where the user left it.
+- **A keyboard shortcut for 1:1.** WPF key bindings can't use a bare letter or digit, so the 1:1 mode currently only
+  has its button. Ctrl+1 or F11-style keys are candidates.

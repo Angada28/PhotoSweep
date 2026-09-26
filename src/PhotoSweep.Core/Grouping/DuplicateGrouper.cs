@@ -140,7 +140,7 @@ public static class DuplicateGrouper
         var (ranked, reason) = KeeperRanker.Rank(members, context: set);
         var keeper = ranked[0];
         var result = ranked.Select((file, index) => Classify(file, keeper, isKeeper: index == 0, fingerprintOf)).ToList();
-        return new PhotoGroup(result, reason);
+        return new PhotoGroup(result, reason, set);
     }
 
     private static GroupMember Classify(ScannedFile file, ScannedFile keeper, bool isKeeper, Func<ScannedFile, ImageFingerprint?> fingerprintOf)

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using PhotoSweep.Core.Imaging;
 using PhotoSweep.Core.Scanning;
 
 namespace PhotoSweep.Core.Grouping;
@@ -28,17 +29,23 @@ public static partial class KeeperRanker
 
     private static readonly Criterion[] Criteria =
     [
-        new((a, b) => b.ResolutionTier.CompareTo(a.ResolutionTier),
+        new(KeeperCriterion.Resolution,
+            (a, b) => b.ResolutionTier.CompareTo(a.ResolutionTier),
             (a, b) => $"Highest resolution ({Dimensions(a)} vs {Dimensions(b)})"),
-        new((a, b) => b.HasCameraData.CompareTo(a.HasCameraData),
-            (a, _) => CameraName(a) is { } camera ? $"Has camera data ({camera})" : "Has camera data"),
-        new((a, b) => a.LooksLikeCopy.CompareTo(b.LooksLikeCopy),
+        new(KeeperCriterion.CameraData,
+            (a, b) => b.HasCameraData.CompareTo(a.HasCameraData),
+            (a, _) => CameraName(a.File.Details) is { } camera ? $"Has camera data ({camera})" : "Has camera data"),
+        new(KeeperCriterion.OriginalName,
+            (a, b) => a.LooksLikeCopy.CompareTo(b.LooksLikeCopy),
             (_, b) => $"Original file name (\"{Path.GetFileName(b.File.Path)}\" looks like a copy)"),
-        new((a, b) => b.SizeWithinFormat.CompareTo(a.SizeWithinFormat),
+        new(KeeperCriterion.FileSize,
+            (a, b) => b.SizeWithinFormat.CompareTo(a.SizeWithinFormat),
             (a, b) => $"Larger file, less compressed ({Sizes(a.File.SizeBytes, b.File.SizeBytes)})"),
-        new((a, b) => WholeSeconds(a.File.LastWriteUtc).CompareTo(WholeSeconds(b.File.LastWriteUtc)),
+        new(KeeperCriterion.OlderCopy,
+            (a, b) => WholeSeconds(a.File.LastWriteUtc).CompareTo(WholeSeconds(b.File.LastWriteUtc)),
             (a, b) => $"Older copy (modified {Dates(a.File.LastWriteUtc, b.File.LastWriteUtc)})"),
-        new((a, b) => string.CompareOrdinal(a.File.Path, b.File.Path),
+        new(KeeperCriterion.Path,
+            (a, b) => string.CompareOrdinal(a.File.Path, b.File.Path),
             (_, _) => "Equally good copies; first by path"),
     ];
 
@@ -81,6 +88,42 @@ public static partial class KeeperRanker
         return (ranked.Select(c => c.File).ToList(), reason);
     }
 
+    /// <summary>
+    /// Compares two files the way <see cref="Rank"/> orders them, criterion by criterion. Used by the compare window to
+    /// mark which of two photos is better on each detail, so it can never disagree with the keeper the ranking picked.
+    /// </summary>
+    /// <param name="context">
+    /// What the group-relative keys are measured against. Pass the group's <see cref="PhotoGroup.RankContext"/> to get
+    /// exactly the order the group was ranked in. <paramref name="a"/> and <paramref name="b"/> are added to it if missing.
+    /// </param>
+    public static KeeperComparison Compare(ScannedFile a, ScannedFile b, IReadOnlyCollection<ScannedFile>? context = null)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+        IReadOnlyCollection<ScannedFile> all = context is null ? [a, b] : [.. context.Union([a, b])];
+        var pair = Candidate.For([a, b], all).ToList();
+        var (ca, cb) = (pair[0], pair[1]);
+
+        var results = Criteria.ToDictionary(c => c.Id, c => Math.Sign(c.Compare(ca, cb)));
+        var deciding = Criteria.FirstOrDefault(c => results[c.Id] != 0);
+        if (deciding is null)
+            return new KeeperComparison(0, null, IdenticalReason, results); // the same path twice
+
+        var winner = results[deciding.Id];
+        var reason = SameBytes(a, b) ? IdenticalReason
+            : winner < 0 ? deciding.Explain(ca, cb) : deciding.Explain(cb, ca);
+        return new KeeperComparison(winner, deciding.Id, reason, results);
+    }
+
+    /// <summary>"Canon EOS R5", "Apple iPhone 15", or null without make and model.</summary>
+    public static string? CameraName(ImageDetails? details)
+    {
+        var (make, model) = (details?.CameraMake, details?.CameraModel);
+        if (model is null) return make;
+        if (make is null || model.StartsWith(make, StringComparison.OrdinalIgnoreCase)) return model; // "Canon" + "Canon EOS R5"
+        return $"{make} {model}";
+    }
+
     public static bool LooksLikeCopy(string path) => CopyName().IsMatch(Path.GetFileNameWithoutExtension(path));
 
     // "(1)", "copy" as a whole word (so not "copyright" or "photocopy"; "_" counts as a separator), and
@@ -108,14 +151,6 @@ public static partial class KeeperRanker
     }
 
     private static string Dimensions(Candidate c) => c.File.Details is { } d ? $"{d.Width}×{d.Height}" : "unknown";
-
-    private static string? CameraName(Candidate c)
-    {
-        var (make, model) = (c.File.Details?.CameraMake, c.File.Details?.CameraModel);
-        if (model is null) return make;
-        if (make is null || model.StartsWith(make, StringComparison.OrdinalIgnoreCase)) return model; // "Canon" + "Canon EOS R5"
-        return $"{make} {model}";
-    }
 
     /// <summary>
     /// "1.5 MB vs 200 KB", adding decimals (up to 3) until the two read differently, so a real difference never
@@ -156,7 +191,7 @@ public static partial class KeeperRanker
         return $"{a.ToLocalTime().ToString(format, CultureInfo.InvariantCulture)} vs {b.ToLocalTime().ToString(format, CultureInfo.InvariantCulture)}";
     }
 
-    private sealed record Criterion(Func<Candidate, Candidate, int> Compare, Func<Candidate, Candidate, string> Explain);
+    private sealed record Criterion(KeeperCriterion Id, Func<Candidate, Candidate, int> Compare, Func<Candidate, Candidate, string> Explain);
 
     /// <summary>A file plus its sort keys, some of which depend on the rest of the group.</summary>
     private sealed record Candidate(ScannedFile File, long ResolutionTier, bool HasCameraData, bool LooksLikeCopy, double SizeWithinFormat)
@@ -195,3 +230,31 @@ public static partial class KeeperRanker
         };
     }
 }
+
+/// <summary>The ranking criteria, in the order <see cref="KeeperRanker"/> applies them.</summary>
+public enum KeeperCriterion
+{
+    Resolution,
+    CameraData,
+    OriginalName,
+
+    /// <summary>Larger file within the same format.</summary>
+    FileSize,
+
+    /// <summary>Older last-modified time, to the whole second.</summary>
+    OlderCopy,
+
+    /// <summary>Ordinal path; only a tie-breaker.</summary>
+    Path,
+}
+
+/// <summary>The result of <see cref="KeeperRanker.Compare"/>.</summary>
+/// <param name="Winner">-1 when A ranks first, 1 when B does, 0 only for the same path twice.</param>
+/// <param name="DecidedBy">The first criterion that separates them, i.e. the one the ranking used.</param>
+/// <param name="Reason">Why the winner ranks first, in the words the results page uses.</param>
+/// <param name="ByCriterion">For each criterion on its own: -1 A is better, 1 B is better, 0 a tie.</param>
+public sealed record KeeperComparison(
+    int Winner,
+    KeeperCriterion? DecidedBy,
+    string Reason,
+    IReadOnlyDictionary<KeeperCriterion, int> ByCriterion);

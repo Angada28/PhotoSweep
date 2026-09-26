@@ -13,6 +13,8 @@ public sealed partial class MainViewModel : ObservableObject
     private readonly ICleanupService _cleanup;
     private readonly IShellService _shell;
     private readonly IFileAvailability _availability;
+    private readonly IWindowService _windows;
+    private readonly IPreviewLoader _previews;
     private readonly TimeProvider _time;
 
     public MainViewModel(
@@ -22,12 +24,16 @@ public sealed partial class MainViewModel : ObservableObject
         ICleanupService cleanup,
         IShellService shell,
         IFileAvailability availability,
+        IWindowService windows,
+        IPreviewLoader previews,
         TimeProvider? time = null)
     {
         _scanService = scanService;
         _cleanup = cleanup;
         _shell = shell;
         _availability = availability;
+        _windows = windows;
+        _previews = previews;
         _time = time ?? TimeProvider.System;
         Start = new StartViewModel(folderPicker, knownFolders, StartScan);
         _currentPage = Start;
@@ -57,7 +63,7 @@ public sealed partial class MainViewModel : ObservableObject
         _ = scanning.RunAsync(); // never throws: every outcome becomes a page state or a navigation
     }
 
-    private void ShowResults(ScanOutcome outcome) => CurrentPage = new ResultsViewModel(outcome, _scanService, _cleanup, _shell, _availability, GoToStart, _time);
+    private void ShowResults(ScanOutcome outcome) => CurrentPage = new ResultsViewModel(outcome, _scanService, _cleanup, _shell, _availability, _windows, _previews, GoToStart, _time);
 
     private void GoToStart() => CurrentPage = Start;
 }

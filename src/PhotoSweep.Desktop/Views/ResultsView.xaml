@@ -10,7 +10,6 @@
         <!-- A photo tile: the whole tile is the button, so a click anywhere toggles it. -->
         <Style x:Key="PhotoTile" TargetType="Button">
             <Setter Property="Width" Value="176" />
-            <Setter Property="Margin" Value="0,8,8,0" />
             <Setter Property="Padding" Value="7" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="White" />
@@ -67,8 +66,25 @@
             <Setter Property="CornerRadius" Value="4" />
         </Style>
 
+        <!--
+            A photo tile. Clicking it (or Space) selects it. Compare opens three ways that never change the selection:
+            the small Compare button (shown on hover and while the tile has keyboard focus), right-click > Compare, and
+            Enter on a focused tile. The Compare button is the tile's sibling, not its child, so it still works when the
+            tile is disabled (the last photo left unselected), and the menu is on the Grid for the same reason: a disabled
+            button passes its mouse input to its parent.
+        -->
         <DataTemplate x:Key="PhotoTemplate">
+            <Grid x:Name="Tile" Margin="0,8,8,0" Background="Transparent">
+                <Grid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Compare" Command="{Binding CompareCommand}" InputGestureText="Enter" />
+                    </ContextMenu>
+                </Grid.ContextMenu>
             <Button Style="{StaticResource PhotoTile}" Command="{Binding ToggleCommand}">
+                <!-- A Button clicks on Enter; this binding runs first and handles the key, so Enter compares instead. -->
+                <Button.InputBindings>
+                    <KeyBinding Key="Enter" Command="{Binding CompareCommand}" />
+                </Button.InputBindings>
                 <StackPanel>
                     <Grid Width="158" Height="158" Background="#F0F0F0">
                         <Image behaviors:ThumbnailLoader.Photo="{Binding}" behaviors:ThumbnailLoader.Size="158"
@@ -107,6 +123,19 @@
                     <TextBlock Text="{Binding MatchText}" Style="{StaticResource Detail}" />
                 </StackPanel>
             </Button>
+                <!-- Transparent rather than collapsed, so Tab still reaches it (and focusing it shows it). -->
+                <Button x:Name="CompareButton" Content="Compare" Command="{Binding CompareCommand}" Opacity="0"
+                        HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,138,13,0" Padding="8,1"
+                        ToolTip="Compare side by side, bigger (Enter)" />
+            </Grid>
+            <DataTemplate.Triggers>
+                <Trigger SourceName="Tile" Property="IsMouseOver" Value="True">
+                    <Setter TargetName="CompareButton" Property="Opacity" Value="1" />
+                </Trigger>
+                <Trigger SourceName="Tile" Property="IsKeyboardFocusWithin" Value="True">
+                    <Setter TargetName="CompareButton" Property="Opacity" Value="1" />
+                </Trigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
     </UserControl.Resources>
 
@@ -264,7 +293,9 @@
                         <Border Margin="0,0,0,12" Padding="12,8,12,12" BorderBrush="#E3E3E3" BorderThickness="1" CornerRadius="6">
                             <StackPanel>
                                 <DockPanel>
-                                    <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}" Foreground="Gray" Margin="12,0,0,0" />
+                                    <Button DockPanel.Dock="Right" Content="Compare" Command="{Binding CompareCommand}" Padding="10,1" Margin="12,0,0,0"
+                                            ToolTip="Compare this group's photos side by side, bigger" />
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}" Foreground="Gray" Margin="12,0,0,0" VerticalAlignment="Center" />
                                     <TextBlock TextTrimming="CharacterEllipsis">
                                         <Run Text="★" Foreground="{StaticResource KeeperBrush}" />
                                         <Run Text="{Binding KeeperReason, Mode=OneWay}" />

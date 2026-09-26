@@ -201,4 +201,94 @@ public class KeeperRankerTests
 
         Assert.Equal(forward, backward);
     }
+
+    // ---- Compare: the pairwise view the compare window uses ----
+
+    [Fact]
+    public void Compare_agrees_with_the_ranking_for_every_pair()
+    {
+        ScannedFile[] files =
+        [
+            Photo("a.jpg", width: 4000, height: 2990),
+            Photo("b.jpg", width: 4000, height: 3000),
+            Photo("c.jpg", width: 4000, height: 2995, camera: "X"),
+            Photo("d.png", size: 1),
+            Photo("e (1).jpg"),
+            Photo("f.jpg", size: 99_500),
+            Photo("g.jpg", modified: DefaultTime.AddDays(-3)),
+            Photo("h.jpg", width: 800, height: 600, camera: "Y"),
+            Photo("i.png", width: 4000, height: 3000, size: 5_000_000),
+        ];
+        var ranked = KeeperRanker.Rank(files).Ranked.ToList();
+
+        foreach (var a in files)
+        {
+            foreach (var b in files.Where(f => f != a))
+            {
+                var aFirst = ranked.IndexOf(a) < ranked.IndexOf(b);
+                Assert.Equal(aFirst ? -1 : 1, KeeperRanker.Compare(a, b, files).Winner);
+            }
+        }
+    }
+
+    [Fact]
+    public void Compare_reports_each_criterion_on_its_own()
+    {
+        var left = Photo("IMG_1 (1).jpg", width: 4000, height: 3000, size: 900_000);
+        var right = Photo("IMG_1.jpg", width: 800, height: 600, camera: "Pixel 8", size: 100_000, modified: DefaultTime.AddYears(-1));
+
+        var comparison = KeeperRanker.Compare(left, right);
+
+        Assert.Equal(-1, comparison.Winner);
+        Assert.Equal(KeeperCriterion.Resolution, comparison.DecidedBy);
+        Assert.Equal("Highest resolution (4000×3000 vs 800×600)", comparison.Reason);
+        Assert.Equal(-1, comparison.ByCriterion[KeeperCriterion.Resolution]);
+        Assert.Equal(1, comparison.ByCriterion[KeeperCriterion.CameraData]);
+        Assert.Equal(1, comparison.ByCriterion[KeeperCriterion.OriginalName]);
+        Assert.Equal(-1, comparison.ByCriterion[KeeperCriterion.FileSize]);
+        Assert.Equal(1, comparison.ByCriterion[KeeperCriterion.OlderCopy]);
+    }
+
+    [Fact]
+    public void Compare_explains_from_the_winners_side()
+    {
+        var comparison = KeeperRanker.Compare(Photo("small.jpg", width: 800, height: 600), Photo("big.jpg", width: 4000, height: 3000));
+
+        Assert.Equal(1, comparison.Winner);
+        Assert.Equal("Highest resolution (4000×3000 vs 800×600)", comparison.Reason);
+    }
+
+    [Fact]
+    public void Compare_only_weighs_file_size_within_the_same_format()
+    {
+        var comparison = KeeperRanker.Compare(Photo("a.jpg", size: 1_000_000), Photo("a.png", size: 5_000_000));
+
+        Assert.Equal(0, comparison.ByCriterion[KeeperCriterion.FileSize]);
+    }
+
+    [Fact]
+    public void Compare_measures_against_the_context_like_the_grouper_does()
+    {
+        // wide is within 1% of the largest in the set, narrow isn't; on their own, both are "largest".
+        var wide = Photo("wide.jpg", width: 1000, height: 1000);
+        var narrow = Photo("narrow.jpg", width: 995, height: 1000, camera: "Pixel 8");
+        var outsider = Photo("outsider.jpg", width: 1010, height: 1000);
+
+        Assert.Equal(1, KeeperRanker.Compare(wide, narrow).Winner);
+        Assert.Equal(KeeperCriterion.CameraData, KeeperRanker.Compare(wide, narrow).DecidedBy);
+
+        var inSet = KeeperRanker.Compare(wide, narrow, [wide, narrow, outsider]);
+        Assert.Equal(-1, inSet.Winner);
+        Assert.Equal(KeeperCriterion.Resolution, inSet.DecidedBy);
+        Assert.Equal(wide, KeeperRanker.Rank([wide, narrow], [wide, narrow, outsider]).Ranked[0]);
+    }
+
+    [Fact]
+    public void Compare_calls_byte_identical_files_identical()
+    {
+        var comparison = KeeperRanker.Compare(Photo("a.jpg", sha: "S"), Photo("a copy.jpg", sha: "S"));
+
+        Assert.Equal(-1, comparison.Winner);
+        Assert.Equal(KeeperRanker.IdenticalReason, comparison.Reason);
+    }
 }

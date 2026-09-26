@@ -102,9 +102,17 @@ internal sealed class FakeShellService : IShellService
 
     public bool Succeeds { get; set; } = true;
 
+    public List<string> ShownInFolder { get; } = [];
+
     public bool OpenFolder(string path)
     {
         Opened.Add(path);
+        return Succeeds;
+    }
+
+    public bool ShowInFolder(string filePath)
+    {
+        ShownInFolder.Add(filePath);
         return Succeeds;
     }
 }

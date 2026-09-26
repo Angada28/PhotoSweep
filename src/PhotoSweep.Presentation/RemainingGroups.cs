@@ -46,7 +46,7 @@ internal static class RemainingGroups
                 members[0] = members[0] with { Kind = MatchKind.Keeper, PHashDistance = null, DHashDistance = null };
             }
 
-            shown.Add(new ShownGroup(new PhotoGroup(members, keeperMoved ? KeeperMovedReason : group.KeeperReason), keeperMoved));
+            shown.Add(new ShownGroup(new PhotoGroup(members, keeperMoved ? KeeperMovedReason : group.KeeperReason, group.RankContext), keeperMoved));
         }
 
         return shown;

@@ -30,7 +30,7 @@ public class CleanupServiceTests : IDisposable
         var request = new ScanRequest(new ScanOptions { Folders = [_temp.Root] }, MatchLevel.SamePhoto);
         var outcome = new ScanOutcome(request, new ScanResult(files, cacheHits: 0), groups, []);
         var results = new ResultsViewModel(outcome, new FakeScanService(), new CleanupService(), new FakeShellService(),
-            new DiskFileAvailability(), () => { });
+            new DiskFileAvailability(), new FakeWindowService(), new FakePreviewLoader(), () => { });
         Assert.Equal(3, results.SelectedCount); // every copy except the keepers
 
         results.MoveCommand.Execute(null);
