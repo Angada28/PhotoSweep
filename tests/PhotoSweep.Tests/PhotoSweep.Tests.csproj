@@ -25,6 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\PhotoSweep.Core\PhotoSweep.Core.csproj" />
     <ProjectReference Include="..\..\src\PhotoSweep.Presentation\PhotoSweep.Presentation.csproj" />
+    <ProjectReference Include="..\..\tools\PhotoSweep.Eval\PhotoSweep.Eval.csproj" />
   </ItemGroup>
 
 </Project>

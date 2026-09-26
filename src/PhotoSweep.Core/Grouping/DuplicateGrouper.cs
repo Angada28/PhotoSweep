@@ -33,7 +33,23 @@ public static class DuplicateGrouper
     public static IReadOnlyList<PhotoGroup> Group(IEnumerable<ScannedFile> files, MatchLevel level)
     {
         ArgumentNullException.ThrowIfNull(files);
-        var limits = MatchThresholds.For(level); // validates the level up front
+        return Group(files, MatchThresholds.For(level)); // For validates the level up front
+    }
+
+    /// <summary>
+    /// Groups at arbitrary look-alike limits instead of a level's, for measuring candidate thresholds (tools/PhotoSweep.Eval).
+    /// Member kinds are still classified against <see cref="MatchThresholds.SamePhoto"/>.
+    /// </summary>
+    public static IReadOnlyList<PhotoGroup> Group(IEnumerable<ScannedFile> files, MatchThresholds limits)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentOutOfRangeException.ThrowIfNegative(limits.PHashRadius);
+        ArgumentOutOfRangeException.ThrowIfNegative(limits.DHashLimit);
+        return Group(files, (MatchThresholds?)limits);
+    }
+
+    private static IReadOnlyList<PhotoGroup> Group(IEnumerable<ScannedFile> files, MatchThresholds? limits)
+    {
 
         // Anything with data takes part, whatever its status: that includes online-only files served from the
         // cache and undecodable files that were still hashed. Files never read (online-only skipped, unreadable)

@@ -229,4 +229,28 @@ public class DuplicateGrouperTests
         Assert.True(MatchThresholds.SamePhoto.DHashLimit <= MatchThresholds.Similar.DHashLimit);
         Assert.Throws<ArgumentOutOfRangeException>(() => MatchThresholds.For((MatchLevel)99));
     }
+
+    [Fact]
+    public void Custom_thresholds_group_exactly_like_the_level_with_the_same_limits()
+    {
+        ScannedFile[] files =
+        [
+            Photo("a.jpg", width: 2000, height: 1500),
+            Photo("a copy.jpg", sha: "SHA-a.jpg", width: 2000, height: 1500),
+            Photo("b.jpg", pHash: Bits(3), dHash: Bits(2)),
+            Photo("c.jpg", pHash: Bits(10)),
+            Photo("d.jpg", pHash: Bits(40)),
+            Photo("e.jpg", pHash: Bits(41), dHash: Bits(1)),
+        ];
+        static string Describe(IReadOnlyList<PhotoGroup> groups) =>
+            string.Join(" | ", groups.Select(g => string.Join(",", g.Members.Select(m => $"{Path.GetFileName(m.File.Path)}:{m.Kind}:{m.PHashDistance}/{m.DHashDistance}"))));
+
+        foreach (var level in new[] { MatchLevel.SamePhoto, MatchLevel.Similar })
+            Assert.Equal(Describe(DuplicateGrouper.Group(files, level)), Describe(DuplicateGrouper.Group(files, MatchThresholds.For(level)!.Value)));
+
+        // And a limit no level has: at 2/2, b (3/2) no longer joins a, but d and e (1/1 apart) still pair up.
+        var strict = DuplicateGrouper.Group(files, new MatchThresholds(2, 2));
+        Assert.Equal(["a copy.jpg,a.jpg", "d.jpg,e.jpg"], strict.Select(g => string.Join(",", g.Members.Select(m => Path.GetFileName(m.File.Path)).Order())).Order());
+        Assert.Throws<ArgumentOutOfRangeException>(() => DuplicateGrouper.Group(files, new MatchThresholds(-1, 2)));
+    }
 }

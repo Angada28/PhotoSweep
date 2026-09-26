@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Developer tool for measuring match accuracy and tuning MatchThresholds. Not part of the app and never shipped:
+       nothing in src/ references it. It's in the solution so the build keeps it compiling as Core changes, and so
+       the tests can check its metrics. See tools/PhotoSweep.Eval/README.md. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\PhotoSweep.Core\PhotoSweep.Core.csproj" />
+  </ItemGroup>
+
+</Project>
