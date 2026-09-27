@@ -1,0 +1,28 @@
+# Git stores text files with LF and converts them to the platform's line ending on checkout (CRLF on Windows).
+* text=auto
+
+*.cs      text diff=csharp
+*.xaml    text
+*.csproj  text
+*.props   text
+*.md      text
+*.json    text
+*.yml     text
+
+# Visual Studio rewrites solution files with CRLF, so keep them CRLF everywhere to avoid churn.
+*.sln     text eol=crlf
+
+# Binaries: never convert line endings, never text-diff.
+*.jpg     binary
+*.jpeg    binary
+*.png     binary
+*.gif     binary
+*.bmp     binary
+*.tif     binary
+*.tiff    binary
+*.webp    binary
+*.heic    binary
+*.ico     binary
+*.zip     binary
+*.dll     binary
+*.exe     binary
