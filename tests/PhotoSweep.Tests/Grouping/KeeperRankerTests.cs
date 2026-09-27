@@ -69,7 +69,24 @@ public class KeeperRankerTests
     [InlineData("holiday_edited", true)]
     [InlineData("holiday-resized", true)]
     [InlineData("holiday exported", true)]
+    [InlineData("IMG_1234.0", true)]
+    [InlineData("IMG_1234.1", true)]
+    [InlineData("20190714_160231.0", true)]
+    [InlineData("Zelda_Breath_of_the_Wild_all_shrines_map_Champions_Ballad_DLC.0", true)] // real name (sweep-test)
     [InlineData("IMG_1234", false)]
+    // Real names from sweep-test with dots that aren't copy markers.
+    [InlineData("2016-03-09 21.03.33", false)]
+    [InlineData("Sugoroku.Hajime.600.1995993", false)]
+    [InlineData("Legend of Zelda, The - The Minish Cap (U).st1", false)]
+    [InlineData("Screen_Shot_2017-11-06_at_12.41.31_PM", false)]
+    [InlineData("IMG_0508.JPG", false)] // "IMG_0508.JPG.jpg": the stem ends in letters
+    [InlineData("720px-Huffman_coding_visualisation.svg", false)]
+    // Dotted dates, versions, numbers and two-digit suffixes.
+    [InlineData("14.07.2019", false)]
+    [InlineData("2019.07.4", false)]
+    [InlineData("v1.2.3", false)]
+    [InlineData("3.5", false)]
+    [InlineData("IMG.10", false)]
     [InlineData("copyright notice", false)]
     [InlineData("photocopy", false)]
     [InlineData("2019-07-14 beach", false)]

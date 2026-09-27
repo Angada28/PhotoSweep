@@ -11,6 +11,11 @@ namespace PhotoSweep.Core.Cleanup;
 /// Every check here reads only directory metadata (<see cref="FileInfo"/>: exists, size, last-write time), and every move
 /// is a rename (<see cref="NoCopyMove"/>). No file is ever opened, so online-only cloud files are never downloaded.
 /// One file failing never stops the others; each failure is reported in the result.
+/// <para>
+/// Google Takeout metadata sidecars (<see cref="Sidecars"/>) travel with their photo: moved right after it, recorded in
+/// the same manifest, and put back next to wherever the photo was put back. A sidecar only ever moves once its photo
+/// has, and a sidecar that can't move is reported separately without holding its photo back.
+/// </para>
 /// </remarks>
 public sealed class ReviewFolder(TimeProvider? timeProvider = null)
 {
@@ -27,6 +32,8 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
         var manifests = new Dictionary<string, BatchManifest>(StringComparer.OrdinalIgnoreCase);
         var moved = new List<MovedFile>();
         var failures = new List<CleanupFailure>();
+        var sidecarFailures = new List<CleanupFailure>();
+        var sidecarsMoved = 0;
 
         foreach (var group in plan.Groups)
         {
@@ -45,16 +52,33 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
                     new BatchManifest(Path.Combine(move.Root, ScanOptions.ReviewFolderName, folderName, BatchManifest.FileName), id, createdUtc, []);
 
                 if (TryMove(move, manifest) is { } failure)
+                {
                     failures.Add(failure);
-                else
-                    moved.Add(new MovedFile(move.File.Path, manifest.ReviewPathOf(manifest.Entries[^1])));
+                    continue;
+                }
+
+                var photo = manifest.Entries[^1];
+                moved.Add(new MovedFile(move.File.Path, manifest.ReviewPathOf(photo)));
+
+                // Only now that the photo has moved, so a sidecar never goes without its photo.
+                foreach (var sidecar in Sidecars.Find(move.File.Path))
+                {
+                    if (TryMoveSidecar(sidecar, sidecar[move.File.Path.Length..], photo, manifest) is { } sidecarFailure)
+                        sidecarFailures.Add(sidecarFailure);
+                    else
+                        sidecarsMoved++;
+                }
             }
         }
 
         foreach (var manifest in manifests.Values.Where(m => m.Entries.Count == 0))
             TryRemoveEmptyBatch(manifest);
 
-        return new CleanupResult(ToBatch(id, createdUtc, manifests.Values.Where(m => m.Entries.Count > 0)), moved, failures);
+        return new CleanupResult(ToBatch(id, createdUtc, manifests.Values.Where(m => m.Entries.Count > 0)), moved, failures)
+        {
+            SidecarsMoved = sidecarsMoved,
+            SidecarFailures = sidecarFailures,
+        };
     }
 
     /// <summary>Every batch still in the review folders of these roots, newest first. Reads the manifests from disk.</summary>
@@ -86,10 +110,17 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
     /// restored alongside it as "name (2).ext". Each restored file is removed from the manifest straight away, so a
     /// partly failed undo can simply be run again.
     /// </summary>
+    /// <remarks>
+    /// A photo's sidecars follow it only once it's out of the review folder, and go next to where it actually landed:
+    /// "a (2).jpg" gets "a (2).jpg.json", so the pair stays together. A sidecar whose photo can't be put back stays in the
+    /// manifest for the next undo; one whose photo is gone from the review folder stays where it is.
+    /// </remarks>
     public UndoResult Undo(CleanupBatch batch)
     {
         var restored = new List<RestoredFile>();
         var failures = new List<CleanupFailure>();
+        var sidecarFailures = new List<CleanupFailure>();
+        var sidecarsRestored = 0;
 
         foreach (var manifestPath in batch.ManifestPaths)
         {
@@ -99,7 +130,10 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
                 continue;
             }
 
-            foreach (var entry in manifest.Entries.ToList())
+            var sidecarsOf = manifest.Entries.Where(e => e.IsSidecar).ToLookup(e => e.SidecarOf!, StringComparer.OrdinalIgnoreCase);
+            var photos = manifest.Entries.Where(e => !e.IsSidecar).ToList();
+
+            foreach (var entry in photos)
             {
                 var original = manifest.OriginalPathOf(entry);
                 var reviewPath = manifest.ReviewPathOf(entry);
@@ -108,8 +142,57 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
                 {
                     // Unchanged original: the move never happened (crash after the write-ahead entry) or an earlier undo
                     // restored it but crashed before updating the manifest. Either way there's nothing to do.
-                    if (!Matches(original, entry.SizeBytes, entry.LastWriteUtc))
+                    var alreadyBack = Matches(original, entry.SizeBytes, entry.LastWriteUtc);
+                    if (!alreadyBack)
                         failures.Add(new(original, CleanupFailureReason.NotFound, "No longer in the review folder."));
+                    manifest.Entries.Remove(entry);
+                    manifest.TrySave();
+
+                    if (alreadyBack)
+                        RestoreSidecars(manifest, sidecarsOf[entry.RelativePath], original);
+                    else
+                        LeaveSidecars(manifest, sidecarsOf[entry.RelativePath]);
+                    continue;
+                }
+
+                string restoredPath;
+                try
+                {
+                    restoredPath = RestoreWithoutOverwriting(reviewPath, original);
+                    restored.Add(new RestoredFile(original, restoredPath));
+                    manifest.Entries.Remove(entry);
+                    manifest.TrySave(); // if this fails, the next undo sees an unchanged original and drops the entry
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    failures.Add(new(original, IoReason(ex), ex.Message)); // entry kept, so undo can retry; its sidecars wait
+                    continue;
+                }
+
+                RestoreSidecars(manifest, sidecarsOf[entry.RelativePath], restoredPath);
+            }
+
+            // Sidecars whose photo an earlier undo already put back, but which couldn't follow it then.
+            var photoPaths = photos.Select(p => p.RelativePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var orphans in sidecarsOf.Where(g => !photoPaths.Contains(g.Key)))
+                RestoreSidecars(manifest, orphans, Path.Combine(manifest.Root, orphans.Key));
+
+            if (manifest.Entries.Count == 0)
+                TryRemoveEmptyBatch(manifest);
+        }
+
+        return new UndoResult(restored, failures) { SidecarsRestored = sidecarsRestored, SidecarFailures = sidecarFailures };
+
+        void RestoreSidecars(BatchManifest manifest, IEnumerable<ManifestEntry> sidecars, string photoPath)
+        {
+            foreach (var entry in sidecars)
+            {
+                var original = manifest.OriginalPathOf(entry);
+                var reviewPath = manifest.ReviewPathOf(entry);
+                if (!File.Exists(reviewPath))
+                {
+                    if (!Matches(original, entry.SizeBytes, entry.LastWriteUtc))
+                        sidecarFailures.Add(new(original, CleanupFailureReason.NotFound, "No longer in the review folder."));
                     manifest.Entries.Remove(entry);
                     manifest.TrySave();
                     continue;
@@ -117,21 +200,32 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
 
                 try
                 {
-                    restored.Add(new RestoredFile(original, RestoreWithoutOverwriting(reviewPath, original)));
+                    RestoreWithoutOverwriting(reviewPath, photoPath + entry.RelativePath[entry.SidecarOf!.Length..]);
+                    sidecarsRestored++;
                     manifest.Entries.Remove(entry);
-                    manifest.TrySave(); // if this fails, the next undo sees an unchanged original and drops the entry
+                    manifest.TrySave();
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    failures.Add(new(original, IoReason(ex), ex.Message)); // entry kept, so undo can retry
+                    sidecarFailures.Add(new(original, IoReason(ex), $"{ex.Message} It's still in the review folder: {reviewPath}"));
                 }
             }
-
-            if (manifest.Entries.Count == 0)
-                TryRemoveEmptyBatch(manifest);
         }
 
-        return new UndoResult(restored, failures);
+        // The photo is gone from the review folder (e.g. the user deleted it there), so its sidecar stays too: putting
+        // metadata back into the library without its photo would only leave an orphan there instead.
+        void LeaveSidecars(BatchManifest manifest, IEnumerable<ManifestEntry> sidecars)
+        {
+            foreach (var entry in sidecars)
+            {
+                var reviewPath = manifest.ReviewPathOf(entry);
+                if (File.Exists(reviewPath))
+                    sidecarFailures.Add(new(manifest.OriginalPathOf(entry), CleanupFailureReason.NotFound,
+                        $"Its photo is no longer in the review folder, so it was left there too: {reviewPath}"));
+                manifest.Entries.Remove(entry);
+                manifest.TrySave();
+            }
+        }
     }
 
     /// <summary>Returns null on success, or why the file wasn't moved.</summary>
@@ -143,8 +237,27 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
         if (info.Length != move.File.SizeBytes || info.LastWriteTimeUtc != move.File.LastWriteUtc)
             return new(move.File.Path, CleanupFailureReason.ChangedSinceScan, "The file has changed since the scan; scan again to review it.");
 
+        return WriteAheadAndMove(move.File.Path, new ManifestEntry(move.RelativePath, move.File.SizeBytes, move.File.LastWriteUtc), manifest);
+    }
+
+    /// <summary>
+    /// Moves one sidecar of an already-moved photo into the same folder, next to it. Its size and time are taken now
+    /// (sidecars aren't scanned), from directory metadata only.
+    /// </summary>
+    /// <param name="suffix">What the sidecar's name adds to the photo's, e.g. ".json".</param>
+    private static CleanupFailure? TryMoveSidecar(string path, string suffix, ManifestEntry photo, BatchManifest manifest)
+    {
+        var info = new FileInfo(path);
+        if (!info.Exists)
+            return new(path, CleanupFailureReason.NotFound, "The sidecar no longer exists.");
+
+        return WriteAheadAndMove(path, new ManifestEntry(photo.RelativePath + suffix, info.Length, info.LastWriteTimeUtc, SidecarOf: photo.RelativePath), manifest);
+    }
+
+    /// <summary>Records <paramref name="entry"/> in the manifest, then moves the file. Null on success.</summary>
+    private static CleanupFailure? WriteAheadAndMove(string source, ManifestEntry entry, BatchManifest manifest)
+    {
         // Write-ahead: the manifest records the move before it happens. If it can't be written, the file stays put.
-        var entry = new ManifestEntry(move.RelativePath, move.File.SizeBytes, move.File.LastWriteUtc);
         manifest.Entries.Add(entry);
         try
         {
@@ -153,21 +266,21 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             manifest.Entries.Remove(entry);
-            return new(move.File.Path, CleanupFailureReason.IoError, $"Couldn't write the manifest, so the file wasn't moved: {ex.Message}");
+            return new(source, CleanupFailureReason.IoError, $"Couldn't write the manifest, so the file wasn't moved: {ex.Message}");
         }
 
         try
         {
             var destination = manifest.ReviewPathOf(entry);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            NoCopyMove.Move(move.File.Path, destination);
+            NoCopyMove.Move(source, destination);
             return null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             manifest.Entries.Remove(entry);
             manifest.TrySave(); // if this fails, the stale entry is harmless: undo sees the original unchanged and drops it
-            return new(move.File.Path, IoReason(ex), ex.Message);
+            return new(source, IoReason(ex), ex.Message);
         }
     }
 
@@ -227,9 +340,10 @@ public sealed class ReviewFolder(TimeProvider? timeProvider = null)
 
     private static CleanupBatch ToBatch(Guid id, DateTime createdUtc, IEnumerable<BatchManifest> manifests)
     {
+        // Photos only: "moved 3 photos (12 MB)" shouldn't count the few KB of metadata that went with them.
         var list = manifests.ToList();
-        return new CleanupBatch(id, createdUtc, list.Select(m => m.ManifestPath).ToList(),
-            list.Sum(m => m.Entries.Count), list.Sum(m => m.Entries.Sum(e => e.SizeBytes)));
+        var photos = list.SelectMany(m => m.Entries).Where(e => !e.IsSidecar).ToList();
+        return new CleanupBatch(id, createdUtc, list.Select(m => m.ManifestPath).ToList(), photos.Count, photos.Sum(e => e.SizeBytes));
     }
 
     /// <summary>

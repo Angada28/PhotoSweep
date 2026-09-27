@@ -179,4 +179,47 @@ public class ScanCacheTests : IDisposable
 
         Assert.Equal(2, ScanCache.Load(_temp.CachePath).Count);
     }
+
+    // Version 2 had no frame count. JPEG entries are still right (a JPEG can't be animated), so they're kept; GIF, PNG
+    // and WebP entries might hide an animation, so those files are read again.
+    [Fact]
+    public async Task Version_2_cache_keeps_entries_for_formats_that_cant_be_animated()
+    {
+        var jpg = _temp.AddPhoto("coffee.jpg");
+        var gif = TempPhotoFolder.AddAnimatedGif(_temp.Root, "burst.gif", frames: 3);
+        await Scan();
+
+        // Turn the saved cache into what version 2 wrote: same entries, no FrameCount, and poison the SHA-256s so a
+        // cache hit is visible.
+        var json = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(_temp.CachePath))!;
+        json["Version"] = 2;
+        foreach (var (_, entry) in json["Entries"]!.AsObject())
+        {
+            entry!.AsObject().Remove("FrameCount");
+            entry["Sha256"] = "OLD";
+        }
+
+        File.WriteAllText(_temp.CachePath, json.ToJsonString());
+
+        var result = await Scan();
+
+        Assert.Equal(1, result.CacheHits);
+        Assert.Equal("OLD", result.Files.Single(f => f.Path == jpg).Sha256);
+        var reRead = result.Files.Single(f => f.Path == gif);
+        Assert.NotEqual("OLD", reRead.Sha256);
+        Assert.Equal(3, reRead.Details!.FrameCount);
+    }
+
+    [Fact]
+    public async Task Frame_count_survives_the_cache()
+    {
+        TempPhotoFolder.AddAnimatedGif(_temp.Root, "burst.gif", frames: 4);
+        await Scan();
+
+        var second = await Scan();
+
+        Assert.Equal(1, second.CacheHits);
+        Assert.True(Assert.Single(second.Files).Details!.IsAnimated);
+        Assert.Equal(4, second.Files[0].Details!.FrameCount);
+    }
 }

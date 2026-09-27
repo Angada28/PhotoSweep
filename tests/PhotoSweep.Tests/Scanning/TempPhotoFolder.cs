@@ -1,3 +1,6 @@
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
+
 namespace PhotoSweep.Tests.Scanning;
 
 /// <summary>
@@ -42,6 +45,22 @@ internal sealed class TempPhotoFolder : IDisposable
         var target = PathFor(relativePath);
         File.WriteAllBytes(target, bytes);
         return target;
+    }
+
+    /// <summary>Writes an animated GIF of <paramref name="frames"/> differently shaded frames into <paramref name="folder"/>.</summary>
+    public static string AddAnimatedGif(string folder, string name, int frames)
+    {
+        var path = Path.Combine(folder, name);
+        using var image = new Image<Rgba32>(64, 48, new Rgba32(0, 0, 0));
+        for (var i = 1; i < frames; i++)
+        {
+            var shade = (byte)(i * 40);
+            using var frame = new Image<Rgba32>(64, 48, new Rgba32(shade, shade, shade));
+            image.Frames.AddFrame(frame.Frames.RootFrame);
+        }
+
+        image.SaveAsGif(path);
+        return path;
     }
 
     public static byte[] ReadTestPhoto(string testPhoto) => File.ReadAllBytes(Path.Combine(PhotoDir, testPhoto));

@@ -38,6 +38,7 @@ public sealed partial class GroupViewModel
         Photos = group.Members.Select(m => new PhotoViewModel(m, this, availability, localZone)).ToList();
         _suggested = suggestNothing ? [] : Photos.Where(p => PreselectionPolicy.IsSuggested(p.Member, level)).ToHashSet();
         FreeableBytes = group.Members.Skip(1).Sum(m => m.File.SizeBytes);
+        Kind = GroupKindClassifier.Classify(group); // from the members left, so a burst whose frames were moved can become Copies
         SizeText = $"{DisplayText.Count(Photos.Count, "photo", "photos")} · {DisplayText.Bytes(FreeableBytes)} besides the keeper";
 
         if (selection is null)
@@ -56,6 +57,12 @@ public sealed partial class GroupViewModel
     public PhotoGroup Group { get; }
 
     public string KeeperReason => Group.KeeperReason;
+
+    /// <summary>What sort of group this is; the page filters by it.</summary>
+    public GroupKind Kind { get; }
+
+    /// <summary>The badge on the row: "Copies", "Burst", "Screenshots" or "Look-alikes".</summary>
+    public string KindLabel => GroupFilterOption.BadgeFor(Kind);
 
     /// <summary>Keeper first, then the rest in rank order.</summary>
     public IReadOnlyList<PhotoViewModel> Photos { get; }

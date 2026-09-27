@@ -36,6 +36,26 @@ public sealed record RestoredFile(string OriginalPath, string RestoredPath)
 /// </summary>
 public sealed record CleanupBatch(Guid Id, DateTime CreatedUtc, IReadOnlyList<string> ManifestPaths, int FileCount, long TotalBytes);
 
-public sealed record CleanupResult(CleanupBatch Batch, IReadOnlyList<MovedFile> Moved, IReadOnlyList<CleanupFailure> Failures);
+/// <param name="Moved">Photos moved. Their Takeout sidecars aren't listed here; see <see cref="SidecarsMoved"/>.</param>
+/// <param name="Failures">Photos that weren't moved.</param>
+public sealed record CleanupResult(CleanupBatch Batch, IReadOnlyList<MovedFile> Moved, IReadOnlyList<CleanupFailure> Failures)
+{
+    /// <summary>Takeout metadata sidecars moved along with their photos (<see cref="Sidecars"/>).</summary>
+    public int SidecarsMoved { get; init; }
 
-public sealed record UndoResult(IReadOnlyList<RestoredFile> Restored, IReadOnlyList<CleanupFailure> Failures);
+    /// <summary>
+    /// Sidecars that stayed behind although their photo moved. Kept apart from <see cref="Failures"/> because the photo
+    /// itself did move: a sidecar never holds its photo back.
+    /// </summary>
+    public IReadOnlyList<CleanupFailure> SidecarFailures { get; init; } = [];
+}
+
+/// <param name="Restored">Photos put back. Their sidecars aren't listed here; see <see cref="SidecarsRestored"/>.</param>
+/// <param name="Failures">Photos that couldn't be put back.</param>
+public sealed record UndoResult(IReadOnlyList<RestoredFile> Restored, IReadOnlyList<CleanupFailure> Failures)
+{
+    public int SidecarsRestored { get; init; }
+
+    /// <summary>Sidecars that couldn't be put back. Their photos are reported (restored or not) as usual.</summary>
+    public IReadOnlyList<CleanupFailure> SidecarFailures { get; init; } = [];
+}

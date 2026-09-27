@@ -1,10 +1,19 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace PhotoSweep.Core.Cleanup;
 
 /// <param name="RelativePath">Relative to the scanned root; the file lives at the same relative path inside the batch folder.</param>
 /// <param name="SizeBytes">Size and last-write time let undo tell "never moved" (the original is still there, unchanged) from "gone".</param>
-internal sealed record ManifestEntry(string RelativePath, long SizeBytes, DateTime LastWriteUtc);
+/// <param name="SidecarOf">
+/// For a Takeout metadata sidecar (<see cref="Sidecars"/>), the <see cref="RelativePath"/> of its photo; null for a photo.
+/// Optional in the JSON, so manifests written before sidecars moved still load (every entry is then a photo).
+/// </param>
+internal sealed record ManifestEntry(string RelativePath, long SizeBytes, DateTime LastWriteUtc, string? SidecarOf = null)
+{
+    [JsonIgnore]
+    public bool IsSidecar => SidecarOf is not null;
+}
 
 /// <summary>
 /// The record of one batch in one scanned root, stored at <c>&lt;root&gt;/_PhotoSweep Removed/&lt;batch&gt;/manifest.json</c>.

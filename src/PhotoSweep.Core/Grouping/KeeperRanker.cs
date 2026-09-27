@@ -13,7 +13,7 @@ namespace PhotoSweep.Core.Grouping;
 /// <list type="number">
 /// <item>Higher resolution. Anything within 1% of the group's largest counts as largest (a few cropped pixels don't matter).</item>
 /// <item>Has camera EXIF (make, model or date taken). Exports and messaging apps usually strip it.</item>
-/// <item>Name doesn't look like a copy ("IMG_1 (1)", "Copy of …", "… - Copy", "…_edited").</item>
+/// <item>Name doesn't look like a copy ("IMG_1 (1)", "Copy of …", "… - Copy", "…_edited", "IMG_1.0").</item>
 /// <item>Larger file, compared only within the same format (a PNG of a JPEG is bigger but holds no more detail).
 /// Within 1% of that format's largest counts as largest.</item>
 /// <item>Older last-modified time, to the whole second.</item>
@@ -124,7 +124,11 @@ public static partial class KeeperRanker
         return $"{make} {model}";
     }
 
-    public static bool LooksLikeCopy(string path) => CopyName().IsMatch(Path.GetFileNameWithoutExtension(path));
+    public static bool LooksLikeCopy(string path)
+    {
+        var stem = Path.GetFileNameWithoutExtension(path);
+        return CopyName().IsMatch(stem) || NumberedCopyName().IsMatch(stem);
+    }
 
     // "(1)", "copy" as a whole word (so not "copyright" or "photocopy"; "_" counts as a separator), and
     // edit/export suffixes. Letters-only lookarounds instead of \b, because \b treats "_" as part of a word.
@@ -132,6 +136,12 @@ public static partial class KeeperRanker
         @"\(\d+\)|(?<![a-z])(copy|edited|resized|compressed|scaled|thumb|thumbnail|export|exported)(?![a-z])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CopyName();
+
+    // "IMG_1234.0": some apps save a second copy with ".0"–".9" before the extension. Only when that is the stem's
+    // only dot and the rest isn't just a number, so dotted dates and times ("2016-03-09 21.03.33", "14.07.2019"),
+    // versions ("v1.2.3") and plain numbers ("3.5") don't count.
+    [GeneratedRegex(@"^[^.]*[^\d.][^.]*\.\d$", RegexOptions.CultureInvariant)]
+    private static partial Regex NumberedCopyName();
 
     // Sub-second differences say nothing about which file came first (a batch copy writes many files within one
     // second, and FAT/exFAT only store 2-second times), and would show as "09:40:11 vs 09:40:11" in the reason.

@@ -226,7 +226,7 @@ public class DuplicateGrouperTests
     public void Thresholds_are_the_measured_values_and_keep_levels_nested()
     {
         // Measured with tools/PhotoSweep.Eval; change them only together with docs/decisions.md.
-        Assert.Equal(new MatchThresholds(4, 5), MatchThresholds.SamePhoto);
+        Assert.Equal(new MatchThresholds(4, 5) { RequireSameCaptureTime = true }, MatchThresholds.SamePhoto);
         Assert.Equal(new MatchThresholds(14, 14), MatchThresholds.Similar);
         Assert.Null(MatchThresholds.For(MatchLevel.Exact));
         Assert.True(MatchThresholds.SamePhoto.PHashRadius <= MatchThresholds.Similar.PHashRadius);
@@ -256,5 +256,79 @@ public class DuplicateGrouperTests
         var strict = DuplicateGrouper.Group(files, new MatchThresholds(2, 2));
         Assert.Equal(["a copy.jpg,a.jpg", "d.jpg,e.jpg"], strict.Select(g => string.Join(",", g.Members.Select(m => Path.GetFileName(m.File.Path)).Order())).Order());
         Assert.Throws<ArgumentOutOfRangeException>(() => DuplicateGrouper.Group(files, new MatchThresholds(-1, 2)));
+    }
+
+    private static readonly DateTime Shot = new(2019, 7, 14, 16, 2, 31);
+
+    [Fact]
+    public void Shots_a_second_or_more_apart_are_Similar_not_SamePhoto()
+    {
+        ScannedFile[] files =
+        [
+            Photo("frame1.jpg", taken: Shot),
+            Photo("frame2.jpg", pHash: Bits(2), taken: Shot.AddSeconds(1)),
+        ];
+
+        Assert.Empty(DuplicateGrouper.Group(files, MatchLevel.SamePhoto));
+        var group = Assert.Single(DuplicateGrouper.Group(files, MatchLevel.Similar));
+        Assert.Equal(MatchKind.Similar, group.Members[1].Kind); // 2/0 bits would be SamePhoto without the rule
+    }
+
+    [Fact]
+    public void Capture_time_only_counts_when_both_photos_have_one()
+    {
+        ScannedFile[] files =
+        [
+            Photo("original.jpg", taken: Shot, width: 4000, height: 3000),
+            Photo("same second.jpg", pHash: Bits(2), taken: Shot),
+            Photo("exif stripped.jpg", pHash: Bits(2), dHash: Bits(1)),
+        ];
+
+        var group = Assert.Single(DuplicateGrouper.Group(files, MatchLevel.SamePhoto));
+        Assert.Equal(3, group.Members.Count);
+        Assert.All(group.Members.Skip(1), m => Assert.Equal(MatchKind.SamePhoto, m.Kind));
+    }
+
+    [Fact]
+    public void Custom_thresholds_apply_the_capture_time_rule_only_when_asked()
+    {
+        ScannedFile[] files = [Photo("a.jpg", taken: Shot), Photo("b.jpg", pHash: Bits(2), taken: Shot.AddSeconds(3))];
+
+        Assert.Single(DuplicateGrouper.Group(files, new MatchThresholds(4, 5)));
+        Assert.Empty(DuplicateGrouper.Group(files, new MatchThresholds(4, 5) { RequireSameCaptureTime = true }));
+    }
+
+    [Theory]
+    [InlineData(MatchLevel.SamePhoto)]
+    [InlineData(MatchLevel.Similar)]
+    public void Animated_images_are_never_matched_by_appearance(MatchLevel level)
+    {
+        // A burst cover GIF hashes exactly like the still its first frame came from (0/0 bits).
+        ScannedFile[] files = [Photo("IMG_BURST_COVER.jpg"), Photo("Burst_Cover_GIF_Action.gif", frames: 12)];
+
+        Assert.Empty(DuplicateGrouper.Group(files, level));
+    }
+
+    [Fact]
+    public void Animated_images_still_group_with_their_byte_identical_copies()
+    {
+        ScannedFile[] files =
+        [
+            Photo("cover.gif", sha: "G", frames: 12),
+            Photo(@"backup\cover.gif", sha: "G", frames: 12),
+            Photo("still.jpg"),
+        ];
+
+        var group = Assert.Single(DuplicateGrouper.Group(files, MatchLevel.Similar));
+        Assert.Equal(["cover.gif", "cover.gif"], Names(group));
+        Assert.Equal(MatchKind.Identical, group.Members[1].Kind);
+    }
+
+    [Fact]
+    public void A_single_frame_gif_is_matched_like_any_photo()
+    {
+        ScannedFile[] files = [Photo("a.jpg"), Photo("a.gif", pHash: Bits(2), frames: 1)];
+
+        Assert.Single(DuplicateGrouper.Group(files, MatchLevel.SamePhoto));
     }
 }

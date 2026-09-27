@@ -41,6 +41,20 @@ public class FileAnalyzerTests : IDisposable
     // The _exif6 file stores its pixels sideways (height > width) with an EXIF tag saying "rotate to display".
     // Reporting the same landscape size as the upright original proves the orientation was applied.
     [Fact]
+    public async Task Animated_gif_reports_its_frames_and_a_still_reports_one()
+    {
+        var animated = await Analyze(TempPhotoFolder.AddAnimatedGif(_temp.Root, "burst.gif", frames: 3));
+        var still = await Analyze(_temp.AddPhoto("chelsea.jpg"));
+
+        Assert.Equal(ScanStatus.Ok, animated.Status);
+        Assert.Equal(3, animated.Details!.FrameCount);
+        Assert.True(animated.Details.IsAnimated);
+        Assert.NotNull(animated.Fingerprint); // still fingerprinted; the grouper decides not to use it
+        Assert.Equal(1, still.Details!.FrameCount);
+        Assert.False(still.Details.IsAnimated);
+    }
+
+    [Fact]
     public async Task Resolution_is_as_displayed_after_exif_rotation()
     {
         var upright = await Analyze(_temp.AddPhoto("chelsea.jpg"));

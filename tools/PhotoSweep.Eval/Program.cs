@@ -12,8 +12,9 @@ const string Usage = """
           Recall and false positives over a pHash/dHash grid, from resized/recompressed/rotated copies of sampled photos.
       review <folder> --out <dir> [--p 8] [--d 8] [--per-bucket 30] [--seed 20260926] [--cache <file>]
           Groups the folder and writes review.html to label a stratified sample of keeper–member pairs.
-      precision <labels.json> [--threshold 2|4|6|8] [--out <dir>]
+      precision <labels.json> [--threshold 2|4|6|8] [--rule capture-time] [--out <dir>]
           Precision per distance bucket, and overall (population-weighted) per threshold, from exported labels.
+          --rule capture-time: before/after the SamePhoto capture-time rule (reads the labelled photos' EXIF).
     The photo folder is only read. --out must be outside it.
     """;
 

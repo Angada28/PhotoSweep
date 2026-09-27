@@ -35,6 +35,11 @@ public sealed partial class ResultsViewModel
     [ObservableProperty]
     private string _confirmText = "";
 
+    /// <summary>"3 of these photos are in groups the current filter hides." Empty (and hidden) when there are none.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasConfirmHiddenText))]
+    private string _confirmHiddenText = "";
+
     [ObservableProperty]
     private string _confirmFoldersHeading = "";
 
@@ -70,6 +75,8 @@ public sealed partial class ResultsViewModel
 
     public bool HasReport => ReportTitle.Length > 0;
 
+    public bool HasConfirmHiddenText => ConfirmHiddenText.Length > 0;
+
     public bool HasUndo => _batches.Count > 0;
 
     public string UndoText => HasUndo ? $"Moved {PhotosAndSize(_batches[^1])} to the review folder." : "";
@@ -103,7 +110,7 @@ public sealed partial class ResultsViewModel
         CleanupValidation validation;
         try
         {
-            validation = _cleanup.Validate(Groups.Select(g => g.Group).ToList(), SelectedPaths(), Outcome.Request.Options.Folders);
+            validation = _cleanup.Validate(AllGroups.Select(g => g.Group).ToList(), SelectedPaths(), Outcome.Request.Options.Folders);
         }
         catch (Exception ex)
         {
@@ -121,6 +128,7 @@ public sealed partial class ResultsViewModel
         var files = validation.Plan.Groups.SelectMany(g => g.Remove).ToList();
         ConfirmText = $"Move {DisplayText.Count(files.Count, "photo", "photos")} ({DisplayText.Bytes(files.Sum(m => m.File.SizeBytes))}) "
             + $"to the {ReviewFolderName} folder? Nothing is deleted, and you can undo this.";
+        ConfirmHiddenText = HiddenConfirmText(files.Select(m => m.File.Path));
         ConfirmFoldersHeading = $"{(files.Count == 1 ? "It" : "They")} will go into a dated folder, keeping their subfolders, inside:";
         ConfirmFolders = files.Select(m => m.Root).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase)
             .Select(root => Path.Combine(root, ReviewFolderName)).ToList();
@@ -242,11 +250,15 @@ public sealed partial class ResultsViewModel
         Show(Level, selection);
         NotifyUndoChanged();
 
-        if (result.Failures.Count > 0)
-            ReportMoveFailures(result.Failures);
+        if (result.Failures.Count > 0 || result.SidecarFailures.Count > 0)
+            ReportMoveFailures(result.Failures, result.SidecarFailures);
     }
 
-    private void ReportMoveFailures(IReadOnlyList<CleanupFailure> failures)
+    /// <summary>Heading for Takeout sidecars that stayed behind; their photos moved regardless.</summary>
+    public const string SidecarsLeftHeading =
+        "Their photos were moved, but these Google Takeout metadata files (.json) couldn't go with them and are still in the library:";
+
+    private void ReportMoveFailures(IReadOnlyList<CleanupFailure> failures, IReadOnlyList<CleanupFailure> sidecarFailures)
     {
         var sections = new List<ReportSection>();
         AddSection(sections,
@@ -260,7 +272,12 @@ public sealed partial class ResultsViewModel
             "Couldn't be moved, and were deselected:",
             failures.Where(f => f.Reason == CleanupFailureReason.IoError).Select(f => $"{f.Path}: {f.Message}"));
 
-        ShowReport($"{DisplayText.Count(failures.Count, "photo", "photos")} couldn't be moved", [.. sections]);
+        AddSection(sections, SidecarsLeftHeading, sidecarFailures.Select(f => $"{f.Path}: {f.Message}"));
+
+        ShowReport(failures.Count > 0
+                ? $"{DisplayText.Count(failures.Count, "photo", "photos")} couldn't be moved"
+                : $"Moved the photos, but {DisplayText.Count(sidecarFailures.Count, "metadata file", "metadata files")} stayed behind",
+            [.. sections]);
     }
 
     private static string RescanReason(CleanupFailureReason reason) => reason switch
@@ -333,9 +350,13 @@ public sealed partial class ResultsViewModel
             retry.Select(f => $"{f.Path}: {(f.Reason == CleanupFailureReason.InUse ? "it's open in another app." : f.Message)}"));
         AddSection(sections, "No longer in the review folder, so they couldn't be put back:",
             lost.Select(f => $"{f.Path}: {f.Message}"));
+        AddSection(sections, SidecarsNotBackHeading, result.SidecarFailures.Select(f => $"{f.Path}: {f.Message}"));
         ShowReport(result.Restored.Count > 0 ? $"Put back {DisplayText.Count(result.Restored.Count, "photo", "photos")}." : "Nothing was put back.",
             [.. sections]);
     }
+
+    /// <summary>Heading for Takeout sidecars undo couldn't put back. Their photos are reported as usual.</summary>
+    public const string SidecarsNotBackHeading = "These Google Takeout metadata files (.json) couldn't be put back:";
 
     private void PutBack(string scanPath, string currentPath)
     {
@@ -351,7 +372,20 @@ public sealed partial class ResultsViewModel
         _renamed.Where(r => !_movedOut.Contains(r.Key)).ToDictionary(r => r.Value, r => r.Key, StringComparer.OrdinalIgnoreCase);
 
     private HashSet<string> SelectedPaths() =>
-        Groups.SelectMany(g => g.Photos).Where(p => p.IsSelected).Select(p => p.File.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        AllGroups.SelectMany(g => g.Photos).Where(p => p.IsSelected).Select(p => p.File.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Says how many of the photos about to move are in groups the filter hides, so nothing moves unseen.</summary>
+    private string HiddenConfirmText(IEnumerable<string> moving)
+    {
+        var hidden = AllGroups.Where(g => !SelectedFilter.Shows(g)).SelectMany(g => g.Photos).Select(p => p.File.Path)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var count = moving.Count(hidden.Contains);
+        if (count == 0)
+            return "";
+
+        var photos = DisplayText.Count(count, "of these photos is", "of these photos are");
+        return $"{photos} in groups the \"{SelectedFilter.Name}\" filter hides. Choose All to see them.";
+    }
 
     private void StartWork(string text)
     {
@@ -366,6 +400,7 @@ public sealed partial class ResultsViewModel
     {
         _pendingPlan = null;
         IsConfirming = false;
+        ConfirmHiddenText = "";
     }
 
     private void ShowReport(string title, params ReportSection[] sections)

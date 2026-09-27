@@ -12,8 +12,9 @@ namespace PhotoSweep.Core.Grouping;
 /// <item>Exact pass: files with the same SHA-256 are merged. This is the only way undecodable files (e.g. HEIC)
 /// get grouped, since they have no fingerprint.</item>
 /// <item>Look-alike pass (not for <see cref="MatchLevel.Exact"/>): one fingerprint per distinct file, compared
-/// pairwise by brute force. A pair matches only if both pHash and dHash are within the level's limits. (A BK-tree
-/// was tried and was 17× slower on a real library; see docs/decisions.md.)</item>
+/// pairwise by brute force. A pair matches only if both pHash and dHash are within the level's limits and, at
+/// SamePhoto, their EXIF capture times don't differ. (A BK-tree was tried and was 17× slower on a real library; see
+/// docs/decisions.md.) Animated images (e.g. burst cover GIFs) are left out: they only match byte-identical copies.</item>
 /// <item>Matches are merged with <see cref="UnionFind"/> into connected sets.</item>
 /// <item>Each set is split around keepers, because matching is not transitive: in a burst, neighbouring frames
 /// match but the first and last may look nothing alike. The best file becomes a keeper and takes every file
@@ -86,11 +87,12 @@ public static class DuplicateGrouper
     {
         // One representative per distinct file (after the exact pass each set is one SHA-256): byte-identical copies
         // have identical fingerprints, so comparing them all would only repeat the same work.
+        // Byte-identical copies also share their EXIF, so the representative's capture time speaks for them all.
         var representatives = new List<int>();
         var seenSets = new HashSet<int>();
         for (var i = 0; i < candidates.Count; i++)
         {
-            if (candidates[i].Fingerprint is not null && seenSets.Add(sets.Find(i)))
+            if (LookAlikeFingerprint(candidates[i]) is not null && seenSets.Add(sets.Find(i)))
                 representatives.Add(i);
         }
 
@@ -99,15 +101,21 @@ public static class DuplicateGrouper
         var count = representatives.Count;
         var pHashes = new ulong[count];
         var dHashes = new ulong[count];
+        var taken = new DateTime?[count];
         for (var k = 0; k < count; k++)
-            (pHashes[k], dHashes[k]) = candidates[representatives[k]].Fingerprint!.Value;
+        {
+            var file = candidates[representatives[k]];
+            (pHashes[k], dHashes[k]) = file.Fingerprint!.Value;
+            taken[k] = file.Details?.DateTaken;
+        }
 
         for (var a = 0; a < count; a++)
         {
             var (p, d) = (pHashes[a], dHashes[a]);
             for (var b = a + 1; b < count; b++)
             {
-                if (Hamming.Distance(p, pHashes[b]) <= limits.PHashRadius && Hamming.Distance(d, dHashes[b]) <= limits.DHashLimit)
+                if (Hamming.Distance(p, pHashes[b]) <= limits.PHashRadius && Hamming.Distance(d, dHashes[b]) <= limits.DHashLimit
+                    && !(limits.RequireSameCaptureTime && MatchThresholds.CaptureTimesDiffer(taken[a], taken[b])))
                     sets.Union(representatives[a], representatives[b]);
             }
         }
@@ -121,12 +129,13 @@ public static class DuplicateGrouper
     {
         // A file's fingerprint, or failing that the fingerprint of a byte-identical copy. Deciding per distinct file
         // rather than per path guarantees byte-identical copies always end up in the same group.
+        // Animated images have none here, so they join a group only as byte-identical copies.
         var fingerprintBySha = set
-            .Where(f => f is { Sha256: not null, Fingerprint: not null })
+            .Where(f => f.Sha256 is not null && LookAlikeFingerprint(f) is not null)
             .GroupBy(f => f.Sha256!)
-            .ToDictionary(g => g.Key, g => g.First().Fingerprint!.Value);
+            .ToDictionary(g => g.Key, g => LookAlikeFingerprint(g.First())!.Value);
         ImageFingerprint? FingerprintOf(ScannedFile f) =>
-            f.Fingerprint ?? (f.Sha256 is { } sha && fingerprintBySha.TryGetValue(sha, out var fp) ? fp : null);
+            LookAlikeFingerprint(f) ?? (f.Sha256 is { } sha && fingerprintBySha.TryGetValue(sha, out var fp) ? fp : null);
 
         var remaining = KeeperRanker.Rank(set).Ranked.ToList();
         while (remaining.Count > 1)
@@ -139,7 +148,7 @@ public static class DuplicateGrouper
             {
                 var belongs = ReferenceEquals(f, keeper)
                     || SameBytes(f, keeper)
-                    || (limits is { } l && keeperFingerprint is { } k && FingerprintOf(f) is { } fp && Within(l, fp, k));
+                    || (limits is { } l && keeperFingerprint is { } k && FingerprintOf(f) is { } fp && Within(l, fp, k, f, keeper));
                 (belongs ? members : leftovers).Add(f);
             }
 
@@ -170,7 +179,7 @@ public static class DuplicateGrouper
 
         var kind = isKeeper ? MatchKind.Keeper
             : SameBytes(file, keeper) ? MatchKind.Identical
-            : p is { } pd && d is { } dd && MatchThresholds.SamePhoto.Accepts(pd, dd) ? MatchKind.SamePhoto
+            : p is { } pd && d is { } dd && MatchThresholds.SamePhoto.Accepts(pd, dd, file, keeper) ? MatchKind.SamePhoto
             : MatchKind.Similar;
 
         return new GroupMember(file, kind, p, d);
@@ -178,6 +187,12 @@ public static class DuplicateGrouper
 
     private static bool SameBytes(ScannedFile a, ScannedFile b) => a.Sha256 is not null && a.Sha256 == b.Sha256;
 
-    private static bool Within(MatchThresholds limits, ImageFingerprint a, ImageFingerprint b) =>
-        limits.Accepts(Hamming.Distance(a.PHash, b.PHash), Hamming.Distance(a.DHash, b.DHash));
+    private static bool Within(MatchThresholds limits, ImageFingerprint a, ImageFingerprint b, ScannedFile fileA, ScannedFile fileB) =>
+        limits.Accepts(Hamming.Distance(a.PHash, b.PHash), Hamming.Distance(a.DHash, b.DHash), fileA, fileB);
+
+    /// <summary>
+    /// The fingerprint used for look-alike matching: none for animated images. A burst's cover GIF hashes like the
+    /// still its first frame came from, but it's a different file to keep, so it's matched by bytes only.
+    /// </summary>
+    private static ImageFingerprint? LookAlikeFingerprint(ScannedFile f) => f.Details is { IsAnimated: true } ? null : f.Fingerprint;
 }

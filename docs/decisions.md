@@ -3,6 +3,95 @@
 Decisions that were measured or argued rather than obvious, newest first. Each records what was chosen, the
 evidence, and what would make us revisit it.
 
+## 2026-09-26: Review aids: group kinds, capture-time rule, animated GIFs, `.N` names, Takeout sidecars
+
+Look-alikes are never pre-selected (entry below), so the user reviews them. This makes that faster and fixes the
+special cases the hand review found.
+
+**1. Group kinds, from data the scan already has.** `Core/Grouping/GroupKindClassifier` labels each group Copies, Burst,
+Screenshots or Look-alikes from paths, SHA-256, EXIF capture time, camera make/model and dimensions. It reads no files.
+The first rule that fits wins:
+- **Copies**: every member has the same SHA-256. Checked on the hashes, not on `MatchKind`, because the kinds describe the
+  scan-time keeper, and the page re-labels groups after every move (a burst whose other frame was moved becomes Copies).
+- **Screenshots**: no member has a camera make or model, and the keeper has a screenshot-style name or is at a screen
+  size. Screen sizes are exact desktop resolutions, or a known phone width at 16:9 or taller. iPad 4:3 sizes are left
+  out because 2048×1536 is also a common camera size. The capture time doesn't count as camera data here (unlike in
+  keeper ranking): sweep-test's screenshots and Snapchat saves all have a `DateTimeOriginal`, apparently written by the
+  Takeout fix-up tool from Google's metadata.
+- **Burst**: two or more different capture times, all within 10 s; or a `BURST` name; or members sharing a stem apart
+  from a trailing `_NNN` (Samsung's `20160604_162017` / `…_001`).
+- **Look-alikes**: the rest.
+
+The results page shows the kind as a badge and has filter buttons with counts. **The filter only changes what's
+listed.** Totals, "Select all suggested", Clear and Move cover every group. The selection bar says "(N not shown)",
+and the Move confirmation says how many of the photos are in hidden groups. *Alternative:* Move acts only on what's
+visible. Rejected, because then changing the filter would silently change what Move does.
+
+**2. Capture-time rule: photos taken 1 s or more apart are Similar, not SamePhoto.** `MatchThresholds.SamePhoto` has
+`RequireSameCaptureTime`. When both photos have an EXIF capture time and the times differ (EXIF has whole seconds, so
+differ = 1 s or more), the pair isn't grouped at SamePhoto and is classified Similar at Similar. A re-save keeps its
+original's EXIF time; a second shot doesn't. Measured with `precision --rule capture-time` on the 120 labelled pairs of
+the entry below (both times known for 107):
+
+| Bucket | Removed by the rule | of them "same" (lost) | of them "different" (fixed) | Precision before → after |
+|---|---:|---:|---:|---|
+| 0–2 | 19 of 30 | 12 | 7 | 60.0% → 54.5% (6/11) |
+| 3–4 | 19 of 30 | 2 | 17 | 23.3% → 45.5% (5/11) |
+| 5–6 | 20 of 30 | 8 | 12 | 40.0% → 40.0% (4/10) |
+| 7–8 | 26 of 30 | 1 | 25 | 6.7% → 25.0% (1/4) |
+
+Weighted precision at ≤ 4 goes from 40.2% (28.7–52.9%) to 49.6% (30.4–69.0%), and pairs in the grouping at ≤ 4 drop from
+350 to about 128. Overall the rule removes 61 of the 81 "different" pairs and 23 of the 39 "same" ones. Of those 23:
+- 13 are burst frames 1–10 s apart with no visible change. Under the 2026-09-25 definitions (a burst frame is Similar)
+  they belong in Similar anyway.
+- 10 are real losses: a copy that carries its own capture time (Snapchat and WhatsApp saves, a screenshot of a photo,
+  a wallpaper saved twice). In a library without injected Takeout times these files usually have no capture time, and
+  the rule wouldn't apply to them.
+
+The 95% intervals overlap, so the precision gain isn't established on this sample. **Kept anyway**, because it moves
+pairs to Similar rather than dropping them (they're still grouped and shown), look-alikes are never pre-selected, and
+it removes three quarters of the known-wrong SamePhoto pairs.
+**Revisit if** a library with camera-original EXIF (not injected by a Takeout tool) shows many real re-saves with their
+own capture time; a narrower rule (only when both files name a camera) would keep those.
+
+**Effect on the whole library** (sweep-test, 9,058 files scanned fresh, 47 animated):
+
+| SamePhoto (4/5) | Groups |
+|---|---:|
+| Hashes only, GIFs matched by appearance | 347 |
+| + animated images by bytes only | 337 |
+| + capture-time rule (as shipped) | 135 |
+
+Group kinds as shipped: at SamePhoto, Copies 20, Burst 47, Screenshots 15, Look-alikes 53. At Similar, 815 groups:
+Copies 18, Burst 345, Screenshots 186, Look-alikes 266. At Similar a set of copies can take in a look-alike, which is why
+Similar has fewer Copies groups than SamePhoto. One file in the library has a `.N` copy name (the real `…DLC.0.jpg`).
+
+**3. Animated images match by bytes only.** A burst's cover GIF hashes like the still its first frame came from (0/0
+bits on sweep-test), but it's a different file to keep. `ImageDetails.FrameCount` comes from `Image.Identify`
+(frame headers, no pixels), and `DuplicateGrouper` leaves animated files out of the look-alike pass. They still group
+with byte-identical copies. This also applies to multi-page TIFFs. The scan cache went to version 3. Version-2 entries are
+kept for formats that can't be animated, and only `.gif`, `.png` and `.webp` files are read again.
+
+**4. `IMG_1234.0.jpg` is a copy-style name.** A single digit `.0`–`.9` after the stem's only dot, when the rest isn't
+just a number. Real sweep-test names with dots that must not match (`2016-03-09 21.03.33`,
+`Sugoroku.Hajime.600.1995993`, `Screen_Shot_…_12.41.31_PM`, `…(U).st1`) are in the tests.
+
+**5. Takeout sidecars move with their photo.** `<photo>.json` and `<photo>.supplemental-metadata.json` (`Cleanup/Sidecars`),
+found from directory metadata only.
+- **Move:** a sidecar moves only after its photo has moved, with its own write-ahead manifest entry
+  (`SidecarOf` = the photo's path). A sidecar that can't move is reported in `SidecarFailures`, not `Failures`: the photo
+  still counts as moved, and the page says the metadata file stayed in the library.
+- **Undo:** a sidecar goes back only once its photo is out of the review folder, next to wherever the photo landed
+  ("b (2).jpg" gets "b (2).jpg.json"), never overwriting. If the photo can't be put back, its sidecars wait in the
+  manifest. If the photo was emptied out of the review folder, its sidecar stays there too, rather than returning to the
+  library as an orphan.
+- **Manifest:** the format stays version 1. Older manifests simply have no `SidecarOf`, and batch counts and sizes are
+  photos only.
+- *Not handled:* Takeout's truncated names (51 characters) and `IMG(1).jpg.json` numbering. Guessing wrong would move
+  metadata that belongs to a photo that stays.
+- *Known gap:* a sidecar undo couldn't put back stays in the manifest, but the page's undo stack only tracks photos, so
+  retrying it needs the future "Restore earlier clean-ups" page (or a manual move; the report gives its path).
+
 ## 2026-09-26: SamePhoto becomes pHash ≤ 4, dHash ≤ 5; only byte-identical copies are pre-selected
 
 **Decisions.**
@@ -134,7 +223,7 @@ page drops the stack (files stay in `_PhotoSweep Removed`), so Back asks first w
 crash safe, but finishing leaves nothing for the next undo to tidy up.
 
 **Out of scope for now:** undoing batches from earlier sessions (`FindBatches`), and moving Takeout `.json` sidecars
-with their photos (see the open issue below).
+with their photos (see the open issue below). *Sidecars resolved 2026-09-26 (review aids entry).*
 
 ## 2026-09-25: Results-page thumbnails: ImageSharp, checked for cloud files twice, settle delay before decoding
 
@@ -285,22 +374,24 @@ it, Snapchat and WhatsApp re-saves) were at 0–1 bits.
   wrong ones. The 6 correct groups it loses are burst frames with no visible change; under the definitions above,
   burst frames belong in Similar anyway.
 - Screenshots need a stricter rule than photos, and should never be pre-selected for removal.
-- Burst cover GIFs shouldn't be grouped with the burst's stills.
+- Burst cover GIFs shouldn't be grouped with the burst's stills. *Resolved 2026-09-26: animated images match by bytes only.*
 - Caveat: 34 groups from one library. Re-check the candidate limits on a second library (e.g. the 17k OneDrive one)
   before adopting them.
 
 **Related: Takeout `.json` sidecars.** Each Takeout photo has a metadata sidecar (`IMG_1234.jpg.json`). Clean-up
 moves only the photo, so its sidecar stays behind in the library. Decide whether sidecars should move with their photo
-(and back on undo).
+(and back on undo). *Resolved 2026-09-26: they move with it and come back on undo (review aids entry).*
 
 - **Lock-screen and app screenshots group as SamePhoto.** Screenshots of the same lock screen or app UI differ
   only in small text (clock, notifications) and hash 4–5 bits apart, well inside the SamePhoto limits. The hashes
   are doing their job, as the images really are ~95% identical pixels, but they aren't duplicates. Tighter
   thresholds won't separate them without breaking real matches; this likely needs screenshot-specific handling.
-  The hand review above found 7 of its 14 wrong groups were app screenshots.
+  The hand review above found 7 of its 14 wrong groups were app screenshots. *Addressed 2026-09-26: screenshot groups
+  are labelled and filterable, and screenshots with different capture times aren't SamePhoto (review aids entry). Ones
+  with no capture time still group by hash.*
 - **`name.0.jpg` isn't recognised as a copy name.** Some apps save a second copy as `X.0.jpg`, and it can win the
   keeper ranking on age. Adding a `\.\d+$` pattern is cheap but could match real file names, so it needs testing
-  against a real library first.
+  against a real library first. *Resolved 2026-09-26: `.0`–`.9` after the stem's only dot, tested against real names.*
 
 ## Polish list
 

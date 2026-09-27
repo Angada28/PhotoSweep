@@ -18,13 +18,15 @@ internal static class Files
         int height = 750,
         long size = 100_000,
         DateTime? modified = null,
-        string? camera = null) =>
+        string? camera = null,
+        DateTime? taken = null,
+        int frames = 1) =>
         new(Path.Combine(@"C:\Photos", name), size, modified ?? DefaultTime)
         {
             Status = ScanStatus.Ok,
             Sha256 = sha ?? "SHA-" + name, // distinct per file unless a test says otherwise
             Fingerprint = new ImageFingerprint(pHash, dHash),
-            Details = new ImageDetails(width, height) { CameraModel = camera },
+            Details = new ImageDetails(width, height) { CameraModel = camera, DateTaken = taken, FrameCount = frames },
         };
 
     /// <summary>A file that was hashed but couldn't be decoded, e.g. HEIC.</summary>

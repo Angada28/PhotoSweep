@@ -13,8 +13,15 @@ namespace PhotoSweep.Core.Scanning;
 public sealed class ScanCache
 {
     /// <summary>Bump when the entry format or the hash algorithm changes; older cache files are then ignored.</summary>
-    /// <remarks>2: added image details (size, camera EXIF). Version-1 entries lack them, so they're re-read once.</remarks>
-    public const int FormatVersion = 2;
+    /// <remarks>
+    /// 2: added image details (size, camera EXIF). Version-1 entries lack them, so they're re-read once.
+    /// 3: added the frame count (animated images). Version-2 entries are kept for formats that can't be animated, which
+    /// are known to have one frame, so only GIF, PNG and WebP files are re-read (see <see cref="MigrateVersion2"/>).
+    /// </remarks>
+    public const int FormatVersion = 3;
+
+    // Formats that can hold an animation (APNG is saved as .png). Their version-2 entries don't say whether they do.
+    private static readonly HashSet<string> MaybeAnimated = new(StringComparer.OrdinalIgnoreCase) { ".gif", ".png", ".apng", ".webp" };
 
     private static readonly JsonSerializerOptions JsonOptions = new() { Converters = { new JsonStringEnumConverter() } };
 
@@ -45,6 +52,8 @@ public sealed class ScanCache
                 var file = JsonSerializer.Deserialize<CacheFile>(stream, JsonOptions);
                 if (file is { Version: FormatVersion, Entries: not null })
                     return new ScanCache(filePath, file.Entries);
+                if (file is { Version: 2, Entries: not null })
+                    return new ScanCache(filePath, MigrateVersion2(file.Entries));
             }
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
@@ -54,6 +63,14 @@ public sealed class ScanCache
 
         return new ScanCache(filePath, []);
     }
+
+    /// <summary>
+    /// Version 2 had no frame count. A JPEG, HEIC, BMP… can't be animated, so its entry is still right with one frame
+    /// (the default); entries for formats that can be animated are dropped so those files are read again. On a typical
+    /// library that re-reads a few hundred files instead of all of them.
+    /// </summary>
+    private static IEnumerable<KeyValuePair<string, CacheEntry>> MigrateVersion2(Dictionary<string, CacheEntry> entries) =>
+        entries.Where(e => !MaybeAnimated.Contains(Path.GetExtension(e.Key)));
 
     public bool TryGet(FileCandidate file, out ScannedFile result)
     {
@@ -65,7 +82,7 @@ public sealed class ScanCache
                 Sha256 = e.Sha256,
                 Fingerprint = e is { PHash: { } p, DHash: { } d } ? new ImageFingerprint(p, d) : null,
                 Details = e is { Width: { } w, Height: { } h }
-                    ? new ImageDetails(w, h) { CameraMake = e.CameraMake, CameraModel = e.CameraModel, DateTaken = e.DateTaken }
+                    ? new ImageDetails(w, h) { CameraMake = e.CameraMake, CameraModel = e.CameraModel, DateTaken = e.DateTaken, FrameCount = e.FrameCount ?? 1 }
                     : null,
                 Error = e.Error,
             };
@@ -99,6 +116,7 @@ public sealed class ScanCache
             CameraMake = file.Details?.CameraMake,
             CameraModel = file.Details?.CameraModel,
             DateTaken = file.Details?.DateTaken,
+            FrameCount = file.Details?.FrameCount,
             Error = file.Error,
         };
     }
@@ -174,6 +192,7 @@ public sealed class ScanCache
         public string? CameraMake { get; init; }
         public string? CameraModel { get; init; }
         public DateTime? DateTaken { get; init; }
+        public int? FrameCount { get; init; }
         public string? Error { get; init; }
     }
 }

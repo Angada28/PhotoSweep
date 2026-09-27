@@ -17,6 +17,15 @@ public sealed record ImageDetails(int Width, int Height)
     /// <summary>EXIF DateTimeOriginal. Camera-local time with no time zone (EXIF 2.x doesn't record one).</summary>
     public DateTime? DateTaken { get; init; }
 
+    /// <summary>Frames in the file: more than 1 for an animated GIF, PNG or WebP (or a multi-page TIFF).</summary>
+    public int FrameCount { get; init; } = 1;
+
+    /// <summary>
+    /// Animated images are matched only by their bytes, never by appearance: a burst's cover GIF hashes like one of the
+    /// burst's stills (its first frame), but it's a different thing to keep.
+    /// </summary>
+    public bool IsAnimated => FrameCount > 1;
+
     public long PixelCount => (long)Width * Height;
 
     /// <summary>Exports and messaging apps usually strip these tags; originals straight from a camera keep them.</summary>
@@ -41,6 +50,8 @@ public sealed record ImageDetails(int Width, int Height)
             CameraMake = Text(exif, ExifTag.Make),
             CameraModel = Text(exif, ExifTag.Model),
             DateTaken = Date(exif),
+            // Identify reads every frame's header but no pixels, so counting frames costs nothing extra.
+            FrameCount = Math.Max(1, info.FrameMetadataCollection.Count),
         };
     }
 

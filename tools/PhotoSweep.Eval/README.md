@@ -12,7 +12,7 @@ dotnet run -c Release --project tools/PhotoSweep.Eval -- synthetic <folder> --ou
 dotnet run -c Release --project tools/PhotoSweep.Eval -- review <folder> --out <dir> [--p 8] [--d 8] [--per-bucket 30] [--cache <file>]
 
 # 3. Precision from the labels the page exported.
-dotnet run --project tools/PhotoSweep.Eval -- precision <labels.json> [--threshold 2|4|6|8] [--out <dir>]
+dotnet run --project tools/PhotoSweep.Eval -- precision <labels.json> [--threshold 2|4|6|8] [--rule capture-time] [--out <dir>]
 ```
 
 **synthetic** writes seven variants per original to `<out>/variants` (resized 50% and 25%, JPEG q50 and q30, PNG,
@@ -33,3 +33,10 @@ mark each pair Same/Different (keys S/D), then **Export labels**. Labels also su
 **precision** reports precision per bucket, and overall at each threshold T (pHash ≤ T and dHash ≤ T) weighted by
 each bucket's share of the whole grouping (recorded in the labels file), with 95% Wilson intervals. The overall
 interval uses the Kish effective sample size, 1 / Σ(w²/n).
+
+**`--rule capture-time`** measures the SamePhoto capture-time rule (`MatchThresholds.CaptureTimesDiffer`, the app's own
+code): a pair whose photos both have an EXIF capture time, and the times differ, leaves SamePhoto. It reads the EXIF
+header of each labelled photo (about two per pair; never online-only files, which count as unreadable and keep their
+pair), then prints the tables before the rule, what the rule removed per bucket (split into pairs labelled "same",
+which it loses, and "different", which it fixes), and the tables after. Each bucket's population after the rule is
+estimated as N × kept / sampled, since the sample was drawn at random within the bucket.

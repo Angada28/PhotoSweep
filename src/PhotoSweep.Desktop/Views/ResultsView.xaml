@@ -44,6 +44,51 @@
             </Style.Triggers>
         </Style>
 
+        <!-- The group-kind filter: a ListBox (so SelectedItem binds straight to SelectedFilter) drawn as a row of pill buttons. -->
+        <Style x:Key="FilterBar" TargetType="ListBox">
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ItemsPanel">
+                <Setter.Value>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Margin" Value="0,0,6,0" />
+                        <Setter Property="Cursor" Value="Hand" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Pill" Background="White" BorderBrush="#CCCCCC" BorderThickness="1"
+                                            CornerRadius="12" Padding="12,3">
+                                        <TextBlock x:Name="Text" Text="{Binding Label}" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Pill" Property="BorderBrush" Value="#888888" />
+                                        </Trigger>
+                                        <Trigger Property="IsKeyboardFocused" Value="True">
+                                            <Setter TargetName="Pill" Property="BorderBrush" Value="#2B5797" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Pill" Property="Background" Value="#2B5797" />
+                                            <Setter TargetName="Pill" Property="BorderBrush" Value="#2B5797" />
+                                            <Setter TargetName="Text" Property="Foreground" Value="White" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="Detail" TargetType="TextBlock">
             <Setter Property="Foreground" Value="#555555" />
             <Setter Property="FontSize" Value="11" />
@@ -173,6 +218,11 @@
             </StackPanel>
         </Border>
 
+        <!-- Group-kind filter. Only changes what's listed; totals, selection and Move cover every group. -->
+        <ListBox DockPanel.Dock="Top" Margin="0,12,0,0" Style="{StaticResource FilterBar}"
+                 ItemsSource="{Binding Filters}" SelectedItem="{Binding SelectedFilter}"
+                 IsEnabled="{Binding CanChangeStrictness}" AutomationProperties.Name="Show groups" />
+
         <!--
             Bottom area, top to bottom: report, confirmation, leave reminder, undo bar, summary bar. All in-page panels
             bound to view-model state (no dialogs), so the whole flow is driven and tested through the view-model.
@@ -218,6 +268,8 @@
                     </StackPanel>
                     <StackPanel Margin="0,0,16,0">
                         <TextBlock Text="{Binding ConfirmText}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding ConfirmHiddenText}" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="#8A4B00"
+                                   Visibility="{Binding HasConfirmHiddenText, Converter={StaticResource BoolToVisibility}}" />
                         <TextBlock Text="{Binding ConfirmFoldersHeading}" Margin="0,4,0,0" TextWrapping="Wrap" />
                         <ItemsControl ItemsSource="{Binding ConfirmFolders}" Margin="12,2,0,0" />
                     </StackPanel>
@@ -298,6 +350,9 @@
                                     <Button DockPanel.Dock="Right" Content="Compare" Command="{Binding CompareCommand}" Padding="10,1" Margin="12,0,0,0"
                                             ToolTip="Compare this group's photos side by side, bigger" />
                                     <TextBlock DockPanel.Dock="Right" Text="{Binding SizeText}" Foreground="Gray" Margin="12,0,0,0" VerticalAlignment="Center" />
+                                    <Border DockPanel.Dock="Left" Background="#E8EEF6" CornerRadius="3" Padding="6,0" Margin="0,0,8,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding KindLabel}" Foreground="#2B5797" FontSize="11" FontWeight="SemiBold" />
+                                    </Border>
                                     <TextBlock TextTrimming="CharacterEllipsis">
                                         <Run Text="★" Foreground="{StaticResource KeeperBrush}" />
                                         <Run Text="{Binding KeeperReason, Mode=OneWay}" />

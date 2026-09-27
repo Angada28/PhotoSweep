@@ -11,8 +11,13 @@ namespace PhotoSweep.Presentation;
 /// Moving to the review folder and undo live in <c>ResultsViewModel.Cleanup.cs</c>.
 /// </summary>
 /// <remarks>
+/// The kind filter only changes what's shown. <see cref="AllGroups"/> is what the totals, the selection and Move work
+/// on; <see cref="Groups"/> is the filtered view the list and the compare window use. A photo selected in a group the
+/// filter hides is still moved, and the selection bar and the confirmation say how many of those there are.
+/// <para>
 /// Threading: like <see cref="ScanningViewModel"/>, this class runs on the UI thread only. Grouping runs on the thread
 /// pool inside <see cref="IScanService"/>, and each <c>await</c> resumes back on the UI thread.
+/// </para>
 /// </remarks>
 public sealed partial class ResultsViewModel : ObservableObject
 {
@@ -29,6 +34,7 @@ public sealed partial class ResultsViewModel : ObservableObject
     private readonly Dictionary<MatchLevel, IReadOnlyList<PhotoGroup>> _groupsByLevel = [];
 
     private StrictnessOption _selectedStrictness;
+    private GroupFilterOption _selectedFilter;
     private CancellationTokenSource? _regrouping;
     private bool _bulkChange;
     private CompareViewModel? _compare;
@@ -55,6 +61,7 @@ public sealed partial class ResultsViewModel : ObservableObject
         _localZone = (time ?? TimeProvider.System).LocalTimeZone;
         _groupsByLevel[outcome.Request.Level] = outcome.Groups;
         _selectedStrictness = StrictnessOption.For(outcome.Request.Level);
+        _selectedFilter = Filters[0];
         Show(outcome.Request.Level, selection: null);
     }
 
@@ -65,10 +72,15 @@ public sealed partial class ResultsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(SpaceText))]
     private MatchLevel _level;
 
-    /// <summary>Largest <see cref="GroupViewModel.FreeableBytes"/> first.</summary>
+    /// <summary>Every group at this level, whatever the filter. Largest <see cref="GroupViewModel.FreeableBytes"/> first.</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(GroupCount), nameof(ExtraCopies), nameof(ExtraBytes), nameof(Summary), nameof(SpaceText), nameof(IsEmpty), nameof(EmptyText))]
+    [NotifyPropertyChangedFor(nameof(GroupCount), nameof(ExtraCopies), nameof(ExtraBytes), nameof(Summary), nameof(SpaceText))]
     [NotifyCanExecuteChangedFor(nameof(SelectSuggestedCommand))]
+    private IReadOnlyList<GroupViewModel> _allGroups = [];
+
+    /// <summary>The groups the selected filter shows, in the same order. The list and the compare window use these.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsEmpty), nameof(EmptyText))]
     private IReadOnlyList<GroupViewModel> _groups = [];
 
     [ObservableProperty]
@@ -90,6 +102,23 @@ public sealed partial class ResultsViewModel : ObservableObject
 
     public IReadOnlyList<StrictnessOption> Strictness => StrictnessOption.All;
 
+    /// <summary>All / Copies / Bursts / Screenshots / Look-alikes, with counts.</summary>
+    public IReadOnlyList<GroupFilterOption> Filters { get; } = GroupFilterOption.CreateAll();
+
+    /// <summary>The filter button that's pressed. Changing it only changes <see cref="Groups"/>; the selection stays.</summary>
+    public GroupFilterOption SelectedFilter
+    {
+        get => _selectedFilter;
+        set
+        {
+            if (value is not null && SetProperty(ref _selectedFilter, value))
+                ApplyFilter();
+        }
+    }
+
+    /// <summary>Selected photos in groups the filter hides. Move still moves them.</summary>
+    public int HiddenSelectedCount => AllGroups.Where(g => !SelectedFilter.Shows(g)).Sum(g => g.SelectedCount);
+
     /// <summary>Changing it re-groups the existing scan. Written by hand (not [ObservableProperty]) so a failed re-group can put it back without starting another one.</summary>
     public StrictnessOption SelectedStrictness
     {
@@ -101,16 +130,18 @@ public sealed partial class ResultsViewModel : ObservableObject
         }
     }
 
-    public int GroupCount => Groups.Count;
+    public int GroupCount => AllGroups.Count;
 
-    public string EmptyText => _movedOut.Count > 0 ? "No duplicates left at this strictness." : "No duplicates found at this strictness.";
+    public string EmptyText =>
+        AllGroups.Count > 0 ? $"No groups in \"{SelectedFilter.Name}\"{(_movedOut.Count > 0 ? " left" : "")} at this strictness."
+        : _movedOut.Count > 0 ? "No duplicates left at this strictness." : "No duplicates found at this strictness.";
 
     public bool IsEmpty => Groups.Count == 0;
 
     /// <summary>Every member except each group's keeper.</summary>
-    public int ExtraCopies => Groups.Sum(g => g.Photos.Count - 1);
+    public int ExtraCopies => AllGroups.Sum(g => g.Photos.Count - 1);
 
-    public long ExtraBytes => Groups.Sum(g => g.FreeableBytes);
+    public long ExtraBytes => AllGroups.Sum(g => g.FreeableBytes);
 
     public string Summary => GroupCount == 0
         ? (_movedOut.Count > 0 ? "No duplicates left." : "No duplicates found.")
@@ -126,7 +157,8 @@ public sealed partial class ResultsViewModel : ObservableObject
 
     public string SelectionText => SelectedCount == 0
         ? "No photos selected"
-        : $"{DisplayText.Count(SelectedCount, "photo", "photos")} selected · {DisplayText.Bytes(SelectedBytes)}";
+        : $"{DisplayText.Count(SelectedCount, "photo", "photos")} selected · {DisplayText.Bytes(SelectedBytes)}"
+          + (HiddenSelectedCount is var hidden and > 0 ? $" ({hidden} not shown)" : "");
 
     public IReadOnlyList<string> UnreadableFolders => Outcome.UnreadableFolders;
 
@@ -142,7 +174,7 @@ public sealed partial class ResultsViewModel : ObservableObject
 
     public bool HasNotIncluded => HasUnreadableFolders || HasCloudSkipped;
 
-    private bool CanSelectSuggested => !IsWorking && Groups.Any(g => g.HasSuggestions);
+    private bool CanSelectSuggested => !IsWorking && AllGroups.Any(g => g.HasSuggestions);
 
     [RelayCommand(CanExecute = nameof(CanSelectSuggested))]
     private void SelectSuggested() => ChangeAll(g => g.SelectSuggested());
@@ -214,7 +246,17 @@ public sealed partial class ResultsViewModel : ObservableObject
         _bulkChange = false;
 
         Level = level;
-        Groups = rows;
+        AllGroups = rows;
+        foreach (var filter in Filters)
+            filter.Count = rows.Count(filter.Shows);
+        ApplyFilter();
+    }
+
+    /// <summary>Shows the groups the selected filter lets through. The selection isn't touched, only recounted.</summary>
+    private void ApplyFilter()
+    {
+        Groups = SelectedFilter.Kind is null ? AllGroups : AllGroups.Where(SelectedFilter.Shows).ToList();
+        OnPropertyChanged(nameof(EmptyText)); // also depends on the filter's name
         RecountSelection();
     }
 
@@ -236,7 +278,7 @@ public sealed partial class ResultsViewModel : ObservableObject
     private void ChangeAll(Action<GroupViewModel> change)
     {
         _bulkChange = true;
-        foreach (var group in Groups)
+        foreach (var group in AllGroups)
             change(group);
         _bulkChange = false;
         RecountSelection();
@@ -255,7 +297,9 @@ public sealed partial class ResultsViewModel : ObservableObject
     private void RecountSelection()
     {
         CloseConfirmation(); // its numbers describe the old selection
-        SelectedCount = Groups.Sum(g => g.SelectedCount);
-        SelectedBytes = Groups.Sum(g => g.SelectedBytes);
+        SelectedCount = AllGroups.Sum(g => g.SelectedCount);
+        SelectedBytes = AllGroups.Sum(g => g.SelectedBytes);
+        OnPropertyChanged(nameof(HiddenSelectedCount));
+        OnPropertyChanged(nameof(SelectionText)); // the hidden count may change without the totals changing
     }
 }

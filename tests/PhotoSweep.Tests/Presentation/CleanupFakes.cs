@@ -61,6 +61,13 @@ internal sealed class MoveCall(CleanupPlan plan, int number)
     /// <summary>Moves everything in the plan except the listed failures, as the real engine would report it.</summary>
     public CleanupResult Complete(params (string Path, CleanupFailureReason Reason)[] failures)
     {
+        var result = Build(failures);
+        _result.SetResult(result);
+        return result;
+    }
+
+    private CleanupResult Build((string Path, CleanupFailureReason Reason)[] failures)
+    {
         var failed = failures.Select(f => f.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var moved = Plan.Groups.SelectMany(g => g.Remove).Where(m => !failed.Contains(m.File.Path)).ToList();
         var batch = new CleanupBatch(Guid.NewGuid(), DateTime.UtcNow, moved.Count > 0 ? [BatchFolder + @"\manifest.json"] : [],
@@ -68,8 +75,17 @@ internal sealed class MoveCall(CleanupPlan plan, int number)
         var result = new CleanupResult(batch,
             moved.Select(m => new MovedFile(m.File.Path, Path.Combine(BatchFolder, m.RelativePath))).ToList(),
             failures.Select(f => new CleanupFailure(f.Path, f.Reason, $"engine message for {f.Reason}")).ToList());
-        _result.SetResult(result);
         return result;
+    }
+
+    /// <summary>Moves everything; <paramref name="sidecarPath"/> is reported as a Takeout sidecar that stayed behind.</summary>
+    public void CompleteWithSidecarFailure(string sidecarPath)
+    {
+        var result = Build([]);
+        _result.SetResult(result with
+        {
+            SidecarFailures = [new CleanupFailure(sidecarPath, CleanupFailureReason.InUse, "engine message for sidecar")],
+        });
     }
 
     public void Fail(Exception ex) => _result.SetException(ex);
@@ -85,6 +101,9 @@ internal sealed class UndoCall(CleanupBatch batch)
 
     public void Complete(IEnumerable<RestoredFile> restored, params CleanupFailure[] failures) =>
         _result.SetResult(new UndoResult(restored.ToList(), failures));
+
+    public void Complete(IEnumerable<RestoredFile> restored, IReadOnlyList<CleanupFailure> sidecarFailures) =>
+        _result.SetResult(new UndoResult(restored.ToList(), []) { SidecarFailures = sidecarFailures });
 
     /// <summary>Every moved file comes back to where it was, except any the test renames.</summary>
     public void RestoreAll(CleanupResult moved, params (string Original, string RestoredAs)[] renamed)
