@@ -11,13 +11,15 @@ It's for anyone whose photo library has grown copies over the years: phone backu
 pictures in OneDrive and in a Google Takeout export, resized copies sent through messaging apps, burst shots.
 It runs entirely on your PC. There's no account, no upload and no network access.
 
-<!--
-  Screenshots to add (taken with the repo's test photos only, tests/PhotoSweep.Tests/TestData/Photos):
-  ![Start screen: choose folders and strictness](docs/images/screenshot-start.png)
-  ![Results: groups with the suggested keeper and filter buttons](docs/images/screenshot-results.png)
-  ![Compare window: two photos side by side with synced zoom](docs/images/screenshot-compare.png)
-  ![After a clean-up: the undo bar and the review folder](docs/images/screenshot-undo.png)
--->
+<!-- Screenshots use only the repo's test photos (tests/PhotoSweep.Tests/TestData/Photos). -->
+
+![Start screen: choose folders and strictness](docs/images/screenshot-start.png)
+
+![Results: groups with the suggested keeper and filter buttons](docs/images/screenshot-results.png)
+
+![Compare window: keeper and look-alike side by side, with the details that decide which to keep](docs/images/screenshot-compare.png)
+
+![After a clean-up: the undo bar, with a button to open the review folder](docs/images/screenshot-undo.png)
 
 ## Features
 
