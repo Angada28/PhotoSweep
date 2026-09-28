@@ -4,7 +4,8 @@
         xmlns:vm="clr-namespace:PhotoSweep.Presentation;assembly=PhotoSweep.Presentation"
         xmlns:behaviors="clr-namespace:PhotoSweep.Desktop.Behaviors"
         Title="Compare photos · PhotoSweep" Width="1200" Height="840" MinWidth="820" MinHeight="600"
-        WindowStartupLocation="CenterOwner" UseLayoutRounding="True">
+        WindowStartupLocation="CenterOwner" UseLayoutRounding="True"
+        Icon="/Assets/PhotoSweep.ico">
     <!--
         Keys go to the window: every button and scroll area below is Focusable="False", so Space always toggles the right
         photo instead of pressing whichever button was clicked last, and the arrows never scroll a pane.

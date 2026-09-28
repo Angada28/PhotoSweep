@@ -4,7 +4,7 @@
         xmlns:vm="clr-namespace:PhotoSweep.Presentation;assembly=PhotoSweep.Presentation"
         xmlns:views="clr-namespace:PhotoSweep.Desktop.Views"
         Title="PhotoSweep" Width="900" Height="640" MinWidth="720" MinHeight="560"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen" Icon="/Assets/PhotoSweep.ico">
     <Window.Resources>
         <!-- One template per page view-model type: whatever CurrentPage holds, WPF shows the matching view. -->
         <DataTemplate DataType="{x:Type vm:StartViewModel}">

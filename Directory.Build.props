@@ -6,5 +6,9 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Product>PhotoSweep</Product>
+    <!-- The one place the version lives. The release workflow refuses a tag that isn't "v" + this. -->
+    <Version>1.0.0</Version>
+    <Authors>Angad Harish</Authors>
+    <Copyright>Copyright (c) 2026 Angad Harish</Copyright>
   </PropertyGroup>
 </Project>

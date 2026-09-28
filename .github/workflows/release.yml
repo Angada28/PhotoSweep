@@ -1,0 +1,105 @@
+# Pushing a version tag (git tag v1.0.0 && git push origin v1.0.0) builds, tests and publishes PhotoSweep.exe
+# (single file, self-contained, win-x64), and attaches it and its SHA-256 to a GitHub Release for that tag.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write   # to create the release and upload its files
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # The version lives in Directory.Build.props. A tag that doesn't match it would ship an exe reporting the wrong
+      # version, so stop here instead.
+      - name: Check the tag matches the version
+        shell: pwsh
+        run: |
+          $version = (dotnet msbuild src/PhotoSweep.Desktop/PhotoSweep.Desktop.csproj -getProperty:Version).Trim()
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            Write-Error "Tag $env:GITHUB_REF_NAME doesn't match <Version>$version</Version> in Directory.Build.props."
+            exit 1
+          }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      # Never release something the tests haven't passed on.
+      - name: Restore
+        run: dotnet restore PhotoSweep.sln
+
+      - name: Build
+        run: dotnet build PhotoSweep.sln --configuration Release --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test PhotoSweep.sln --configuration Release --no-build --logger trx --results-directory TestResults
+
+      - name: Test summary
+        if: always()
+        shell: pwsh
+        run: ./.github/scripts/Write-TestSummary.ps1 -ResultsDirectory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          if-no-files-found: warn
+
+      # Single-file, self-contained settings come from PhotoSweep.Desktop.csproj (they apply whenever -r is given).
+      - name: Publish
+        run: dotnet publish src/PhotoSweep.Desktop/PhotoSweep.Desktop.csproj --configuration Release --runtime win-x64 --output publish
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem publish)
+          if ($files.Count -ne 1 -or $files[0].Name -ne 'PhotoSweep.exe') {
+            Write-Error "Expected publish/ to hold only PhotoSweep.exe, found: $($files.Name -join ', ')"
+            exit 1
+          }
+          $hash = (Get-FileHash publish/PhotoSweep.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          # Same format as sha256sum, so `sha256sum -c PhotoSweep.exe.sha256` works too.
+          [IO.File]::WriteAllText("$PWD/publish/PhotoSweep.exe.sha256", "$hash  PhotoSweep.exe`n")
+          "SHA256=$hash" >> $env:GITHUB_ENV
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          ## PhotoSweep $env:VERSION
+
+          Download **PhotoSweep.exe** and run it. No installer, and .NET doesn't need to be installed. Windows 10/11, x64.
+
+          The exe isn't code-signed, so Windows SmartScreen may say "Windows protected your PC" the first time
+          (choose **More info**, then **Run anyway**), and some antivirus tools may flag it. Before running it, you can check
+          it's the file this workflow built:
+
+          ``````powershell
+          (Get-FileHash .\PhotoSweep.exe -Algorithm SHA256).Hash
+          ``````
+
+          It should equal (case doesn't matter):
+
+          ``````
+          $env:SHA256
+          ``````
+          "@
+          Set-Content -Path release-notes.md -Value $notes -Encoding utf8
+          gh release create $env:GITHUB_REF_NAME publish/PhotoSweep.exe publish/PhotoSweep.exe.sha256 `
+            --title "PhotoSweep $env:VERSION" --notes-file release-notes.md --verify-tag

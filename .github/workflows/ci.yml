@@ -1,0 +1,55 @@
+# Builds and tests every push to a branch and every pull request.
+# Windows runner, because PhotoSweep.Desktop targets net10.0-windows (WPF) and the clean-up tests use Windows file APIs.
+name: CI
+
+on:
+  push:
+    branches: ['**']   # branches only; version tags are handled by release.yml
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or PR cancels the run still going for the older one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore PhotoSweep.sln
+
+      # Directory.Build.props already sets TreatWarningsAsErrors; -warnaserror keeps CI strict even if that changes.
+      - name: Build
+        run: dotnet build PhotoSweep.sln --configuration Release --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test PhotoSweep.sln --configuration Release --no-build --logger trx --results-directory TestResults
+
+      - name: Test summary
+        if: always()
+        shell: pwsh
+        run: ./.github/scripts/Write-TestSummary.ps1 -ResultsDirectory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          if-no-files-found: warn
